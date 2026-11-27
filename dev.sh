@@ -5,24 +5,46 @@
 #              backend/ changed     → backend restarts
 #              app/package.json     → npm install + app restarts
 #              app/ code            → the app reloads in the simulator by itself (Vite)
-# Ctrl+C stops everything. cloudflared runs separately (its address changes on restart).
+#   + cloudflared public tunnel to the backend (if ./cloudflared is here) — the address is printed and saved to tunnel.txt
+# Before starting, it stops anything left over from earlier runs. Ctrl+C stops everything.
 cd "$(dirname "$0")" || exit 1
 ROOT=$(pwd)
 PY="${PYTHON:-$HOME/TeleFeed/.venv/bin/python}"
 [ -x "$PY" ] || PY=python3
 BRANCH=$(git rev-parse --abbrev-ref HEAD)
-BACK="" APP="" SIM=""
+BACK="" APP="" SIM="" CF=""
 
 log() { echo "$(date +%H:%M:%S) $*"; }
 start_back() { (cd "$ROOT/backend" && exec "$PY" server.py) & BACK=$!; }
 start_app()  { (cd "$ROOT/app" && exec npx vite --clearScreen false) & APP=$!; }
 start_sim()  { [ "${NO_SIM:-}" = 1 ] && return; (cd "$ROOT/app" && sleep 3 && exec npx evenhub-simulator http://localhost:5173) & SIM=$!; }
+start_cf() {
+  [ -x "$ROOT/cloudflared" ] || return
+  "$ROOT/cloudflared" tunnel --url http://localhost:8090 > "$ROOT/cloudflared.log" 2>&1 & CF=$!
+  for _ in $(seq 1 30); do
+    URL=$(grep -o 'https://[a-z0-9-]*\.trycloudflare\.com' "$ROOT/cloudflared.log" | head -1)
+    [ -n "$URL" ] && break; sleep 1
+  done
+  if [ -n "$URL" ]; then
+    echo "$URL" > "$ROOT/tunnel.txt"
+    log "PUBLIC ADDRESS: $URL"
+  else
+    log "cloudflared: no address yet — see cloudflared.log"
+  fi
+}
+cleanup_old() {
+  for port in 8090 5173; do lsof -ti tcp:$port 2>/dev/null | xargs kill 2>/dev/null; done
+  pkill -f evenhub-simulator 2>/dev/null
+  pkill -f "cloudflared tunnel" 2>/dev/null
+  sleep 1
+}
 kill_tree()  { [ -n "$1" ] && pkill -P "$1" 2>/dev/null; [ -n "$1" ] && kill "$1" 2>/dev/null; }
-stop_all()   { kill_tree "$SIM"; kill_tree "$APP"; kill_tree "$BACK"; wait 2>/dev/null; }
+stop_all()   { kill_tree "$CF"; kill_tree "$SIM"; kill_tree "$APP"; kill_tree "$BACK"; wait 2>/dev/null; }
 trap 'log "stopping"; stop_all; exit 0' INT TERM
 
 [ -d app/node_modules ] || (cd app && npm install --silent)
-start_back; start_app; start_sim
+cleanup_old
+start_back; start_app; start_sim; start_cf
 log "TeleGift Glance running · auto-update from GitHub every 3 s ($BRANCH)"
 
 while true; do

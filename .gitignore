@@ -5,3 +5,6 @@ backend/pairs.json
 backend/pairs.json.tmp
 __pycache__/
 .env
+tunnel.txt
+cloudflared
+cloudflared.log
