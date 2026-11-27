@@ -138,7 +138,7 @@ function lensify(bmp: CanvasImageSource & { width: number; height: number }, siz
           e = Math.min(1, Math.hypot(gx, gy) * 0.9)
         }
         const t0 = tone[p] / Math.max(alpha[p], 0.01)
-        const v = (10 + 190 * t0 * t0) * (1 - 0.85 * e)          // the lens lifts darks, so keep the range low
+        const v = (14 + 225 * t0 * t0) * (1 - 0.85 * e)          // the lens lifts darks, so keep the range low
         d[i] = d[i + 1] = d[i + 2] = v; d[i + 3] = Math.round(alpha[p] * 255)
       }
       ctx.putImageData(img, 0, 0)
@@ -160,11 +160,12 @@ async function stillPicture(title: string, model: string): Promise<HTMLCanvasEle
 const ANIM_FRAMES = 90                           // up to 30 frames a second of a 3 s animation
 // The gift's symbols behind the model (owner 27.11): the 'Pattern' layer of the same Fragment animation, on the same canvas
 // and cut with the same crop as the model — so size and places are 1 in 1 as on the official card; drawn faintly.
-const PATTERN_GRAY = 20                          // the lens lifts darks: 40 shows as a quiet gray
+const HALO: [number, number][] = [[-5, 0], [5, 0], [0, -5], [0, 5], [-4, -4], [4, -4], [-4, 4], [4, 4]]
+const PATTERN_GRAY = 20                         // the lens lifts darks: 40 shows as a quiet gray
 const PATTERN_VIEW = 1                           // the whole card: model 30 % smaller than the tight crop, all symbols as on the official card (owner 27.11)
 async function patternLayer(slug: string, w: number, h: number): Promise<HTMLCanvasElement | null> {
   try {
-    const r = await fetch(`${API}/model-anim?slug=${encodeURIComponent(slug)}&layer=pattern&v=2`)
+    const r = await fetch(`${API}/model-anim?slug=${encodeURIComponent(slug)}&layer=pattern&v=3`)
     if (!r.ok) return null
     const data = await r.json()
     const box = document.createElement('div')
@@ -191,9 +192,12 @@ function faintPattern(src: HTMLCanvasElement, sx: number, sy: number, side: numb
   ctx.imageSmoothingQuality = 'high'
   ctx.drawImage(src, sx, sy, side, side, 0, 0, size, size)
   const img = ctx.getImageData(0, 0, size, size), d = img.data
-  for (let i = 0; i < d.length; i += 4) {
-    const a = d[i + 3] / 255
-    d[i] = d[i + 1] = d[i + 2] = PATTERN_GRAY; d[i + 3] = a > 0.25 ? 255 : Math.round(a * 4 * 255)
+  // the lens lifts any non-black gray to ~40 %, so lowering the gray barely helps: every other pixel is left out
+  // (a checkerboard) — on the lens the symbols look about half as bright
+  for (let i = 0, p = 0; i < d.length; i += 4, p++) {
+    const a = d[i + 3] / 255, x = p % size, y = (p / size) | 0
+    d[i] = d[i + 1] = d[i + 2] = PATTERN_GRAY
+    d[i + 3] = (x + y) % 2 ? 0 : a > 0.25 ? 255 : Math.round(a * 4 * 255)
   }
   ctx.putImageData(img, 0, 0)
   return c
@@ -254,7 +258,12 @@ function modelFrames(slug: string): Promise<Frames | null> {
           range = range || f.range
           if (pat) {                                       // symbols first, the model over them
             const m = document.createElement('canvas'); m.width = m.height = GLANCE_PX
-            const mc = m.getContext('2d')!; mc.drawImage(pat, 0, 0); mc.drawImage(f.c, 0, 0)
+            const mc = m.getContext('2d')!; mc.drawImage(pat, 0, 0)
+            // the accent on the gift itself (owner 27.11): a thin dark gap around its silhouette, symbols never touch it
+            mc.globalCompositeOperation = 'destination-out'
+            for (const [ox, oy] of HALO) mc.drawImage(f.c, ox, oy)
+            mc.globalCompositeOperation = 'source-over'
+            mc.drawImage(f.c, 0, 0)
             out.push(m)
           } else out.push(f.c)
           if (i === 0 && !restFrame.has(slug)) {           // the first frame replaces the still picture right away

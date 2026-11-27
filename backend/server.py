@@ -313,7 +313,7 @@ def model_anim(slug, layer="gift"):
     on the same 512×512 canvas, so they sit exactly as on the official card) — JSON bytes, cached on disk; None if absent."""
     if not re.fullmatch(r"[A-Za-z0-9]+-\d{1,9}", slug or "") or layer not in ("gift", "pattern"):
         return None
-    path = os.path.join(IMG_CACHE, ("anim_" if layer == "gift" else "pat2_") + slug.lower() + ".json")
+    path = os.path.join(IMG_CACHE, ("anim_" if layer == "gift" else "pat3_") + slug.lower() + ".json")
     miss = path[:-5] + ".none"
     if os.path.exists(path):
         return open(path, "rb").read()
@@ -345,6 +345,10 @@ def model_anim(slug, layer="gift"):
             return None
         for x in keep:            # the 'Pattern' layer is a matte for 'Color Icon' and is not drawn itself — draw it
             x.pop("td", None)
+        if layer == "pattern":    # half as many symbols (owner 27.11): every other one, from both rings
+            for a in d.get("assets") or []:
+                if a.get("id") in {x.get("refId") for x in keep} and isinstance(a.get("layers"), list):
+                    a["layers"] = a["layers"][::2]
         d["layers"] = keep
         data = json.dumps(d, separators=(",", ":")).encode()
         with open(path, "wb") as f:
