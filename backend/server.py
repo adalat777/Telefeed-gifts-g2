@@ -5,6 +5,7 @@ Small stdlib-only HTTP server (no dependencies):
   POST /pair                           start pairing: returns a 6-digit code to send to the Telegram bot
   GET  /pair/<code>                    poll: {"paired": true, "token": "..."} once the code was sent to the bot
   POST /send {"token", "item"}         the bot sends this deal to the paired Telegram chat (link + "Open gift" button)
+  GET  /model?c=<collection>&m=<model>  PNG of the gift model without background (cdn.changes.tg, cached on disk)
   GET  /health
 
 Env:
@@ -13,6 +14,7 @@ Env:
   PORT          default 8090
 Secrets never leave this process: the glasses app only gets an opaque pairing token.
 """
+import hashlib
 import json
 import os
 import random
@@ -22,6 +24,7 @@ import sqlite3
 import ssl
 import threading
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -132,6 +135,43 @@ def bot_loop():
             time.sleep(3)
 
 
+# ---------- model pictures (no background) ----------
+MODEL_CDN = "https://cdn.changes.tg/gifts/models/{c}/png/{m}.png"
+TELEFEED_IMG = os.path.normpath(os.path.join(HERE, "..", "..", "data", "models", "web"))   # TeleFeed's own cache
+IMG_CACHE = os.path.join(HERE, "cache")
+_img_lock = threading.Lock()
+
+
+def model_png(col, model):
+    q = urllib.parse.quote
+    url = MODEL_CDN.format(c=q(col, safe=""), m=q(model, safe=""))
+    key = hashlib.sha1(url.encode()).hexdigest()
+    for folder in (TELEFEED_IMG, IMG_CACHE):
+        path = os.path.join(folder, key + ".png")
+        if os.path.exists(path):
+            return open(path, "rb").read()
+    miss = os.path.join(IMG_CACHE, key + ".none")
+    if os.path.exists(miss) and time.time() - os.path.getmtime(miss) < 86400:
+        return None
+    with _img_lock:
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": "TeleGiftGlance/1.0"})
+            with urllib.request.urlopen(req, timeout=15, context=SSL) as r:
+                data = r.read(4_000_000)
+        except urllib.error.HTTPError as e:
+            data = None if e.code == 404 else b""
+        except Exception:
+            data = b""
+        os.makedirs(IMG_CACHE, exist_ok=True)
+        if data and data[:8] == b"\x89PNG\r\n\x1a\n":
+            with open(os.path.join(IMG_CACHE, key + ".png"), "wb") as f:
+                f.write(data)
+            return data
+        if data is None:
+            open(miss, "w").close()
+        return None
+
+
 # ---------- signals (read-only) ----------
 def signals(limit=20, minutes=60):
     key = (limit, minutes)
@@ -223,6 +263,20 @@ class H(BaseHTTPRequestHandler):
                 return self._send(200, signals(limit, minutes))
             except (ValueError, sqlite3.Error) as e:
                 return self._send(503, {"error": type(e).__name__})
+        if u.path == "/model":
+            q = urllib.parse.parse_qs(u.query)
+            col, model = (q.get("c") or [""])[0][:64], (q.get("m") or [""])[0][:64]
+            data = model_png(col, model) if col and model else None
+            if not data:
+                return self._send(404, {"error": "no picture"})
+            self.send_response(200)
+            self.send_header("Content-Type", "image/png")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.send_header("Cache-Control", "max-age=86400")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+            return
         m = re.fullmatch(r"/pair/(\d{6})", u.path)
         if m:
             with _lock:
