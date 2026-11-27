@@ -29,23 +29,29 @@ walking, or during a meeting.
 1. Our existing data engine (TeleFeed) watches new listings on 7 marketplaces and compares every listing with the sales
    history of the same model + backdrop (4.4M past sales, fake and outlier sales removed).
 2. When a listing is at least ×1.75 cheaper than the top clean sale, it becomes a signal.
-3. **Read:** the freshest signal appears on the G2 lens — gift name and number, model and backdrop, price in Stars or
-   GRAM with the dollar value, how much cheaper it is, the marketplace and how fresh the listing is.
-   Swipe to browse; a counter shows new deals that arrived while you were looking.
-4. **Write — one tap:** our Telegram bot @telefeedgifts_ai sends this deal to your own Telegram chat with an
-   **Open gift** button. You open it on the phone and buy in Telegram — two taps.
+3. **Read:** the freshest signal appears on the G2 lens — the animated gift model, `↗ N×`, the resell estimate
+   (`sell ~N ★ → you +X%`), how far below market, price in Stars or GRAM with dollars, marketplace and how fresh it is.
+   Swipe up / down to flip deals. **Tap** opens the full info: GIFT (rarity, floors, how many exist), SALES (all sales of
+   this model + backdrop from every marketplace, this gift's own sales highlighted) and ON SALE (the competition right now).
+4. **Write — one gesture:** **hold** — our Telegram bot @telefeedgifts_ai sends this deal to your own Telegram chat
+   with the gift picture and buttons **Open gift**, **Price chart**, **Watch**. You buy in Telegram — two taps.
+   **Double tap** — watch the lot: the bot writes when it gets cheaper or is sold.
 5. Pairing takes one step: the glasses show a 6-digit code, you send it to the bot. No logins and no passwords on the
    glasses.
 
 ## Telegram integration
 
-- A Telegram bot (Bot API) handles pairing by code and delivers deals as messages with an inline button.
+- A Telegram bot (Bot API) handles pairing by code and delivers deals as photo messages with inline buttons
+  (Open gift, Price chart, Watch); `/settings` and `/collections` decide what the glasses show.
+- Watch alerts: the bot writes when a watched gift gets ≥3 % cheaper or is sold.
 - Buttons open the gift directly in Telegram (`t.me/nft/<gift>`) or on the marketplace.
 - The data comes from Telegram itself: new Telegram Market listings are read through the official MTProto API.
 
 ## Technology
 
-- **Glasses app:** TypeScript + Vite + Even Hub SDK 0.0.14, three text containers, gestures (swipe, tap, double tap).
+- **Glasses app:** TypeScript + Vite + Even Hub SDK 0.0.14; the screen is drawn on canvas into grayscale image tiles
+  (tuned to how the G2 brightens dark tones), the gift animation (Lottie) is pre-rendered frame by frame; gestures:
+  swipe, tap, double tap, hold.
 - **Backend:** one Python file, standard library only — read-only signal feed, pairing, sending through the Bot API.
 - **Data:** TeleFeed (our project, built before the hackathon) — SQLite with live listings and sales history.
 
@@ -68,6 +74,5 @@ delay; free users see deals a couple of minutes later.
 
 ## What's next
 
-- A filter on the glasses: minimum discount, price range, favourite collections.
 - A short sound or vibration for a very strong deal.
 - Real G2 hardware testing (the demo uses the Even Hub simulator).

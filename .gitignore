@@ -13,3 +13,5 @@ backend/watches.json
 backend/watches.json.tmp
 backend/settings.json
 backend/settings.json.tmp
+
+!release/*.ehpk

@@ -32,35 +32,46 @@ TeleFeed (our data, read-only)            backend/server.py                 G2 g
 ### On the lens
 
 Made for a glance, not for reading. The lens stays **dark** until a deal that matches your settings arrives; then it wakes up
-with the money first: **`+$5.51` resell estimate · Mirage Lamp #35247 · 500 ★ ≈ $7.50 · 2s ago · Telegram`** and the
-gift model drawn in grayscale. A very strong deal (×3+) jumps in with a **HOT DEAL** badge. If someone buys it first,
-the card gets a **SOLD** stamp and the next deal takes its place.
+with the money first: the gift model **animated** large on the left (216 px, native speed, loops), and on the right
+`↗ N×`, **`sell ~N ★ → you +X%`**, `N% below market`, gift name and number, price in Stars / GRAM with dollars, how many
+seconds ago it was listed and on which marketplace. A very strong deal (×3+) jumps in with a **HOT DEAL** badge (but never
+while you are reading the full info or touched the glasses in the last 8 s). If someone buys it first, the card gets a
+**SOLD** stamp.
 
-| Gesture | Glance | Card (hold) | Chart (hold again) |
-|---|---|---|---|
-| tap | send the deal to Telegram | send to Telegram | watch it (bot alerts on price drop / sale) |
-| hold | open the card | open the chart | back to glance |
-| double tap | next deal | next deal | next deal |
-| swipe | next / previous deal | next / previous deal | back |
-| Menu (system) | exit | exit | exit |
+| Gesture | Feed (the deal) | Full info (GIFT → SALES → ON SALE) |
+|---|---|---|
+| swipe up | next deal | scroll forward through the pages |
+| swipe down | previous deal | scroll back; above GIFT — back to the feed |
+| tap | open the full info | next page; after ON SALE — back to the feed |
+| double tap | **watch** this lot (the bot writes if it gets cheaper or sells) | back to the feed |
+| hold | **send** the deal to your Telegram | send the deal to your Telegram |
+| Menu (system) | exit | exit |
 
-In the simulator Up/Down rarely reach the app (a text container reports them only at its scroll edge, and a list container
-moves its highlight without telling the app), so the next deal is on the **double tap**; on G2 swipes work as well.
+**Full info** — the gift window of the TeleFeed app rebuilt for the lens, three pages with tabs in the header:
+- **GIFT** — the animated model, price, collection floor and issued / total, model and backdrop with rarity, how many
+  exist and their floors, the symbol, summary `↗ N× · N% below market · N cheaper on sale`.
+- **SALES** — MAXIMUM (and the top sale in Stars), number of sales and per week, this lot; then up to 40 sales of this
+  model + backdrop from all marketplaces (date, price, $, marketplace, number). Sales of *this very gift* are inverted;
+  sales ≥1.75× the model floor (for dark backdrops — the backdrop floor) are highlighted with `N×fl`.
+- **ON SALE** — the same model + backdrop listed right now on all marketplaces, by price in dollars; this lot is a white
+  row in its place, with how long each one is listed.
 
-- **Card** — TeleGift app look: gift card with backdrop + pattern symbols, market plaque, `↗ N×`, price; on the right the
-  resell estimate (usual price − 20 % Telegram fee vs. what you pay), floor / usual price, a live "listed Ns ago" timer.
-- **Chart** — Telegram Market sales of this model + backdrop for 30 days (daily median, the deal's price dashed) and the
-  median sale price on Telegram, MRKT, Portals, Tonnel, GetGems and on-chain as bars.
-- After a tap: full-screen **✓ Sent to Telegram**, then the next deal.
+After hold: full-screen **✓ Sent to Telegram**. The lens goes dark after 10 min without touches and wakes on a tap or on a
+matching deal.
 
 ### In Telegram (@telefeedgifts_ai)
 
 - The deal arrives as the **gift picture** with buttons **🎁 Open gift** (buy in two taps), **📈 Price chart**, **👁 Watch**.
 - **Watch** — the bot writes when the gift gets ≥3 % cheaper or is sold.
-- **/settings** — what the glasses show: minimum resell profit ($2…$50), marketplaces, quiet hours; **/collections** —
+- **/settings** — what the glasses show: minimum resell profit ($2…$50), marketplaces, quiet hours, model animation
+  (loop / once); **/collections** —
   only chosen collections. The glasses get only matching deals and stay dark in quiet hours.
 
 ## Run it
+
+Ready package for the Even Hub app: [`release/telegift-glance.ehpk`](release/telegift-glance.ehpk)
+(built with `cd app && npm run pack`, SDK 0.0.14, uses the public demo backend below).
+
 
 Tests: `python3 -m unittest -v backend/test_server.py` (15 tests, no network).
 
