@@ -731,11 +731,13 @@ def full_info(slug, col, model, backdrop, stars=None, pattern="", mr=None, br=No
     usd = lambda cur, price: (round(price * STAR_USD, 2) if cur == "STARS" else (round(price * rate, 2) if rate else None))
 
     def fl(x):
+        # the floor and its $ value — as in the app: Stars × 0.013, GRAM × today's rate
         if not x:
             return None
         if x.get("ton_only") or x.get("market") not in (None, "telegram") or not x.get("stars"):
-            return {"market": x.get("market") or "telegram", "cur": "GRAM", "price": round(x.get("ton") or 0, 2)}
-        return {"market": "telegram", "cur": "STARS", "price": int(x["stars"])}
+            ton = round(x.get("ton") or 0, 2)
+            return {"market": x.get("market") or "telegram", "cur": "GRAM", "price": ton, "usd": round(ton * rate, 2) if rate else None}
+        return {"market": "telegram", "cur": "STARS", "price": int(x["stars"]), "usd": round(x["stars"] * STAR_OUT_USD, 2)}
 
     f = res.get("floor") or {}
     sim = res.get("similar") or {}
@@ -773,6 +775,7 @@ def full_info(slug, col, model, backdrop, stars=None, pattern="", mr=None, br=No
     pm, pb = _pct(mr), _pct(br)
     out = {
         "floor_col": fl(f.get("collection")), "floor_model": fl(f.get("model")),
+        "floor_backdrop": fl(f.get("backdrop")),     # only for dark backdrops (Black, Onyx Black, Midnight Blue, Gunmetal)
         "issued": issued, "supply": cnt.get("supply"),
         "n_model": int(issued * pm) if issued and pm else None,
         "n_combo": int(issued * pm * pb) if issued and pm and pb else None,

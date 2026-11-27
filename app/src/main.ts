@@ -487,8 +487,8 @@ type Sale = { at: number; market: string; cur: 'STARS' | 'GRAM'; price: number; 
 type Hist = { items: Sale[]; week: number; total: number; usual_usd: number | null
   top: { usd: number | null; cur: string; price: number; at: number } | null; top_stars: { price: number; usd: number; at: number } | null }
 type Lot = { market: string; num: number | null; pattern?: string | null; cur: 'STARS' | 'GRAM'; price: number; usd: number; listed_at?: number }
-type Floor = { market: string; cur: 'STARS' | 'GRAM'; price: number } | null
-type Full = { floor_col: Floor; floor_model: Floor; issued: number | null; supply: number | null; n_model: number | null
+type Floor = { market: string; cur: 'STARS' | 'GRAM'; price: number; usd?: number | null } | null
+type Full = { floor_col: Floor; floor_model: Floor; floor_backdrop?: Floor; issued: number | null; supply: number | null; n_model: number | null
   n_combo: number | null; history: Hist; on_sale: Lot[]; on_sale_wait: boolean }
 const fullCache = new Map<string, { at: number; v: Full | 'loading' | 'error' }>()
 const PAGES = ['GIFT', 'SALES', 'ON SALE']
@@ -631,15 +631,24 @@ function drawSales(ctx: CanvasRenderingContext2D, d: Deal, f: Full | 'loading' |
     ctx.fillText('No sales of this model + backdrop yet — a rare combination', 12, 130)
     return
   }
+  // expensive sales, as in the app: 1.75× the model's floor in $ or more (dark backdrops — the floor of that backdrop)
+  const DARK = ['Black', 'Onyx Black', 'Midnight Blue', 'Gunmetal']
+  const fUsd = (DARK.includes(d.backdrop) && f.floor_backdrop?.usd) || f.floor_model?.usd || null
   fscroll = Math.max(0, Math.min(fscroll, h.items.length - ROWS))
   let y = 104
   for (const it of h.items.slice(fscroll, fscroll + ROWS)) {
     ctx.font = `500 13px ${FONT}`; ctx.fillStyle = C.dim; ctx.fillText(when(it.at), 12, y)
-    ctx.font = `800 15px ${FONT}`; ctx.fillStyle = it.usd && d.usd && it.usd > d.usd * 1.2 ? '#fff' : C.text
-    ctx.fillText(histPrice(it.cur, it.price), 140, y)
+    const over = fUsd && it.usd && it.usd >= fUsd * 1.75 ? it.usd / fUsd : 0
+    ctx.font = `800 15px ${FONT}`
+    const pt = histPrice(it.cur, it.price)
+    if (over) {                                       // inverted price + "×N floor"
+      const pw = ctx.measureText(pt).width
+      rrect(ctx, 134, y - 15, pw + 12, 20, 6); ctx.fillStyle = '#fff'; ctx.fill(); ctx.fillStyle = '#000'
+    } else ctx.fillStyle = C.text
+    ctx.fillText(pt, 140, y)
     ctx.font = `500 12px ${FONT}`; ctx.fillStyle = C.dim
     if (it.usd) ctx.fillText(`$${money(it.usd)}`, 250, y)
-    if (it.usd && d.usd && it.usd > d.usd * 1.2) { ctx.font = `700 12px ${FONT}`; ctx.fillStyle = '#fff'; ctx.fillText(`+${Math.round((it.usd / d.usd - 1) * 100)}%`, 300, y) }
+    if (over) { ctx.font = `800 12px ${FONT}`; ctx.fillStyle = '#fff'; ctx.fillText(`${xs(over)}×fl`, 300, y) }
     ctx.font = `600 12px ${FONT}`; ctx.fillStyle = C.text; ctx.fillText(MARKET[it.market] || it.market, 350, y)
     if (it.num) {
       const t = `#${it.num}`
