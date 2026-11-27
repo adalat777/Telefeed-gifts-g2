@@ -370,6 +370,7 @@ function fit(ctx: CanvasRenderingContext2D, text: string, max: number) {
 }
 const money = (v: number) => (v < 100 ? v.toFixed(2).replace(/\.00$/, '') : String(Math.round(v)))
 const xs = (x: number) => x.toFixed(2).replace(/\.?0+$/, '')   // 2.00 → 2, 2.10 → 2.1, 2.22 → 2.22
+const STAR_USD = 0.015                   // what a Star costs to buy (owner 27.11)
 const usd = (v: number | null) => (v == null ? '' : `≈ $${v < 100 ? v.toFixed(2).replace(/\.00$/, '') : Math.round(v)}`)
 // GRAM: at most 2 decimals
 const priceText = (d: Deal) => (d.cur === 'STARS' ? `${num(d.price)} ★` : `${d.price < 100 ? +d.price.toFixed(2) : Math.round(d.price)} GRAM`)
@@ -914,10 +915,16 @@ function drawGlance(ctx: CanvasRenderingContext2D, d: Deal, pic: HTMLCanvasEleme
   // Layout B (owner 27.11 «цена наверху»): dollars big on top → the price in its own currency · market · age →
   // name → model · backdrop → "↗ N×" with the money words in small caps → signals
   const rs = d.resell && d.resell.profit_usd > 0.5 ? d.resell : null
+  // owner 27.11: on top the price as listed — in GRAM or Stars (the unit smaller); below it in dollars at today's
+  // rates: Stars × $0.015, GRAM × the current GRAM rate (d.usd from the backend)
+  const pt = priceText(d), sp = pt.lastIndexOf(' ')
   ctx.fillStyle = '#fff'; ctx.font = `800 56px ${FONT}`
-  ctx.fillText(fit(ctx, d.usd ? `$${money(d.usd)}` : priceText(d), W - x - 12), x - 2, 90)
+  ctx.fillText(pt.slice(0, sp), x - 2, 90)
+  const nw = ctx.measureText(pt.slice(0, sp)).width
+  ctx.font = `800 ${d.cur === 'STARS' ? 40 : 26}px ${FONT}`; ctx.fillText(pt.slice(sp + 1), x - 2 + nw + 8, 90)
+  const dollars = d.cur === 'STARS' ? d.price * STAR_USD : d.usd
   ctx.font = `600 17px ${FONT}`; ctx.fillStyle = G_MID
-  ctx.fillText(fit(ctx, `${priceText(d)}  ·  ${MARKET[d.market] || d.market}  ·  ${ago(liveAge(d))}`, W - x - 12), x, 116)
+  ctx.fillText(fit(ctx, `${dollars != null ? usd(dollars) + '  ·  ' : ''}${MARKET[d.market] || d.market}  ·  ${ago(liveAge(d))}`, W - x - 12), x, 116)
   ctx.fillStyle = C.text
   titleLine(ctx, d, x, 153, W - x - 12, `700 23px ${FONT}`, `400 21px ${FONT}`)
   ctx.font = `400 15px ${FONT}`; ctx.fillStyle = G_MID
