@@ -928,10 +928,10 @@ function drawGlance(ctx: CanvasRenderingContext2D, d: Deal, pic: HTMLCanvasEleme
   ctx.fillText(xt, x, 211)
   const xw = ctx.measureText(xt).width + 10
   const below = d.fair && d.stars && d.stars < d.fair ? Math.round((1 - d.stars / d.fair) * 100) : 0
-  const parts: string[] = []
-  if (rs) parts.push(`sell ~${num(rs.sell)} ★ → +${Math.round((rs.profit_usd / Math.max(0.01, rs.cost_usd)) * 100)}%`)
+  // the "×" is to the top clean sale of this model + backdrop — say so, with that price (owner 27.11; "usual" removed)
+  const parts: string[] = [d.stars ? `max sale ${num(Math.round(d.x * d.stars))} ★` : 'to max sale']
   if (below >= 5) parts.push(`${below}% below market`)
-  else if (d.fair && !rs) parts.push(`usual ${num(d.fair)} ★`)
+  if (rs) parts.push(`sell ~${num(rs.sell)} ★ → +${Math.round((rs.profit_usd / Math.max(0.01, rs.cost_usd)) * 100)}%`)
   if (parts.length) capsText(ctx, parts.join('  ·  '), x + xw, 210, W - x - xw - 12, `600 12px ${FONT}`, G_MID)
   // one quiet line of signals: competition and how such resales usually end
   const sig: string[] = []
