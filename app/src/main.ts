@@ -600,6 +600,68 @@ function drawInfo(ctx: CanvasRenderingContext2D, d: Deal, f: Full | 'loading' | 
   ctx.fillText(fit(ctx, v.join('  ·  '), mw), x, 236)
 }
 
+// Short tables (owner 27.11): the most telling rows stay, runs of similar prices fold into one row "×N".
+// SALES: neighbours within ±7 % fold; this gift's own sales, expensive ones (≥1.75× floor), the max and the min never fold;
+// at most 14 rows (two screens) — the must-keep ones plus the freshest. ON SALE: neighbours within ±3 % fold, this lot never;
+// everything cheaper than this lot is kept, plus 6 rows after it.
+type SaleRow = Sale & { n: number; nums: Set<number>; markets: Set<string>; over: number }
+type LotRow = Lot & { me?: boolean; n: number; markets: Set<string> }
+const SALE_SIM = 0.07, LOT_SIM = 0.03, SALE_MAX = 14, LOTS_AFTER = 6
+const DARK_BACKDROPS = ['Black', 'Onyx Black', 'Midnight Blue', 'Gunmetal']
+const rowsMemo = new WeakMap<Full, { sales: SaleRow[]; lots: LotRow[]; key: string }>()
+function similar(a: { usd: number | null; price: number; cur: string }, b: { usd: number | null; price: number; cur: string }, tol: number) {
+  if (a.usd == null || b.usd == null) { if (a.cur !== b.cur) return false; return Math.abs(a.price - b.price) <= tol * Math.max(a.price, b.price) }
+  return Math.abs(a.usd - b.usd) <= tol * Math.max(a.usd, b.usd)
+}
+function tableRows(d: Deal, f: Full) {
+  const key = `${d.id}|${d.usd}`
+  const m = rowsMemo.get(f)
+  if (m && m.key === key) return m
+  // sales
+  const fUsd = (DARK_BACKDROPS.includes(d.backdrop) && f.floor_backdrop?.usd) || f.floor_model?.usd || null
+  const items = f.history.items
+  const withUsd = items.filter((i) => i.usd != null)
+  const maxI = withUsd.length ? withUsd.reduce((a, b) => (b.usd! > a.usd! ? b : a)) : null
+  const minI = withUsd.length ? withUsd.reduce((a, b) => (b.usd! < a.usd! ? b : a)) : null
+  const keep = (i: Sale, over: number) => i.mine || over > 0 || i === maxI || i === minI
+  const sales: (SaleRow & { must: boolean })[] = []
+  for (const it of items) {
+    const over = fUsd && it.usd && it.usd >= fUsd * 1.75 ? it.usd / fUsd : 0
+    const last = sales[sales.length - 1]
+    if (last && !last.must && !keep(it, over) && similar(last, it, SALE_SIM)) {
+      last.n++; if (it.num) last.nums.add(it.num); last.markets.add(it.market); continue
+    }
+    sales.push({ ...it, n: 1, nums: new Set(it.num ? [it.num] : []), markets: new Set([it.market]), over, must: keep(it, over) })
+  }
+  let shown = sales
+  if (sales.length > SALE_MAX) {
+    const must = sales.filter((r) => r.must)
+    const rest = sales.filter((r) => !r.must).slice(0, Math.max(0, SALE_MAX - must.length))
+    const pick = new Set([...must, ...rest])
+    shown = sales.filter((r) => pick.has(r))
+  }
+  // lots on sale, this lot in its place
+  const cheaper = f.on_sale.filter((l) => d.usd && l.usd < d.usd).length
+  const raw: (Lot & { me?: boolean })[] = f.on_sale.map((l) => ({ ...l }))
+  if (d.usd) raw.splice(cheaper, 0, { market: d.market, num: d.num, pattern: d.pattern, cur: d.cur, price: d.price, usd: d.usd, me: true })
+  const lots: LotRow[] = []
+  let meAt = -1
+  for (const l of raw) {
+    const last = lots[lots.length - 1]
+    if (last && !last.me && !l.me && similar(last, l, LOT_SIM)) {
+      last.n++; last.markets.add(l.market)
+      if (l.listed_at && (!last.listed_at || l.listed_at > last.listed_at)) last.listed_at = l.listed_at
+      continue
+    }
+    if (l.me) meAt = lots.length
+    lots.push({ ...l, n: 1, markets: new Set([l.market]) })
+  }
+  const cut = meAt >= 0 ? lots.slice(0, meAt + 1 + LOTS_AFTER) : lots.slice(0, SALE_MAX)
+  const out = { sales: shown, lots: cut, key }
+  rowsMemo.set(f, out)
+  return out
+}
+
 // page 2 — SALES: the "Maximum" and "Sales" tiles, then the table (this gift's own sales highlighted)
 function drawSales(ctx: CanvasRenderingContext2D, d: Deal, f: Full | 'loading' | 'error' | undefined) {
   fullHeader(ctx, d)
@@ -632,13 +694,12 @@ function drawSales(ctx: CanvasRenderingContext2D, d: Deal, f: Full | 'loading' |
     return
   }
   // expensive sales, as in the app: 1.75× the model's floor in $ or more (dark backdrops — the floor of that backdrop)
-  const DARK = ['Black', 'Onyx Black', 'Midnight Blue', 'Gunmetal']
-  const fUsd = (DARK.includes(d.backdrop) && f.floor_backdrop?.usd) || f.floor_model?.usd || null
-  fscroll = Math.max(0, Math.min(fscroll, h.items.length - ROWS))
+  const list = tableRows(d, f).sales
+  fscroll = Math.max(0, Math.min(fscroll, list.length - ROWS))
   let y = 104
-  for (const it of h.items.slice(fscroll, fscroll + ROWS)) {
+  for (const it of list.slice(fscroll, fscroll + ROWS)) {
     ctx.font = `500 13px ${FONT}`; ctx.fillStyle = C.dim; ctx.fillText(when(it.at), 12, y)
-    const over = fUsd && it.usd && it.usd >= fUsd * 1.75 ? it.usd / fUsd : 0
+    const over = it.over
     ctx.font = `800 15px ${FONT}`
     const pt = histPrice(it.cur, it.price)
     if (over) {                                       // inverted price + "×N floor"
@@ -649,8 +710,11 @@ function drawSales(ctx: CanvasRenderingContext2D, d: Deal, f: Full | 'loading' |
     ctx.font = `500 12px ${FONT}`; ctx.fillStyle = C.dim
     if (it.usd) ctx.fillText(`$${money(it.usd)}`, 250, y)
     if (over) { ctx.font = `800 12px ${FONT}`; ctx.fillStyle = '#fff'; ctx.fillText(`${xs(over)}×fl`, 300, y) }
-    ctx.font = `600 12px ${FONT}`; ctx.fillStyle = C.text; ctx.fillText(MARKET[it.market] || it.market, 350, y)
-    if (it.num) {
+    else if (it.n > 1) { ctx.font = `700 12px ${FONT}`; ctx.fillStyle = G_MID; ctx.fillText(`×${it.n}`, 304, y) }   // folded similar sales
+    ctx.font = `600 12px ${FONT}`; ctx.fillStyle = C.text
+    ctx.fillText(it.markets.size > 1 ? `${MARKET[it.market] || it.market} +${it.markets.size - 1}` : MARKET[it.market] || it.market, 350, y)
+    if (it.n > 1 && it.nums.size > 1) { ctx.font = `500 12px ${FONT}`; ctx.fillStyle = C.dim; ctx.fillText(`${it.nums.size} gifts`, 430, y) }
+    else if (it.num) {
       const t = `#${it.num}`
       ctx.font = `600 13px ${FONT}`
       const tw = ctx.measureText(t).width
@@ -662,7 +726,7 @@ function drawSales(ctx: CanvasRenderingContext2D, d: Deal, f: Full | 'loading' |
     if (it.pattern) ctx.fillText(fit(ctx, it.pattern, W - 506 - 10), 506, y)
     y += 21.5
   }
-  scrollBar(ctx, fscroll, h.items.length, 92, 246)
+  scrollBar(ctx, fscroll, list.length, 92, 246)
 }
 
 function scrollBar(ctx: CanvasRenderingContext2D, from: number, total: number, y0: number, y1: number) {
@@ -687,21 +751,21 @@ function drawOnSale(ctx: CanvasRenderingContext2D, d: Deal, f: Full | 'loading' 
   const cnt = [...by].map(([m, n]) => `${MARKET[m] || m} ${n}`).join(' · ') || (f.on_sale_wait ? 'still asking the marketplaces…' : 'nobody else sells it now')
   ctx.fillText(fit(ctx, `${d.model} · ${d.backdrop}   ${cnt}`, W - 270), 262, 56)
   ctx.fillStyle = C.line; ctx.fillRect(10, 66, W - 20, 1)
-  // rows, with "this lot" inserted at its place by price
-  type Row = Lot & { me?: boolean }
-  const rows: Row[] = lots.map((l) => ({ ...l }))
-  if (d.usd) rows.splice(cheaper, 0, { market: d.market, num: d.num, pattern: d.pattern, cur: d.cur, price: d.price, usd: d.usd, me: true })
+  // rows, with "this lot" inserted at its place by price; similar prices folded
+  const rows = tableRows(d, f).lots
   fscroll = Math.max(0, Math.min(fscroll, rows.length - ROWS))
   let y = 88
   for (const l of rows.slice(fscroll, fscroll + ROWS)) {
     if (l.me) { rrect(ctx, 6, y - 16, W - 14, 22, 6); ctx.fillStyle = '#fff'; ctx.fill() }
     const ink = l.me ? '#000' : C.text, dim = l.me ? '#000' : C.dim
-    ctx.font = `700 12px ${FONT}`; ctx.fillStyle = ink; ctx.fillText(MARKET[l.market] || l.market, 14, y)
-    ctx.font = `600 13px ${FONT}`; ctx.fillStyle = dim; ctx.fillText(l.me ? `this #${l.num}` : `#${l.num ?? '—'}`, 100, y)
-    ctx.font = `500 12px ${FONT}`; ctx.fillText(fit(ctx, l.pattern || '', 120), 210, y)
+    ctx.font = `700 12px ${FONT}`; ctx.fillStyle = ink
+    ctx.fillText(l.markets.size > 1 ? `${MARKET[l.market] || l.market} +${l.markets.size - 1}` : MARKET[l.market] || l.market, 14, y)
+    ctx.font = `600 13px ${FONT}`; ctx.fillStyle = dim
+    ctx.fillText(l.me ? `this #${l.num}` : l.n > 1 ? `×${l.n} lots` : `#${l.num ?? '—'}`, 100, y)
+    ctx.font = `500 12px ${FONT}`; ctx.fillText(fit(ctx, l.n > 1 ? 'similar price' : l.pattern || '', 120), 210, y)
     ctx.fillText(l.me ? 'now' : age(l.listed_at), 340, y)
     ctx.font = `800 15px ${FONT}`; ctx.fillStyle = l.me ? '#000' : '#fff'
-    const pt = histPrice(l.cur, l.price), pw = ctx.measureText(pt).width
+    const pt = (l.n > 1 ? 'from ' : '') + histPrice(l.cur, l.price), pw = ctx.measureText(pt).width
     ctx.fillText(pt, 490 - pw, y)
     ctx.font = `500 12px ${FONT}`; ctx.fillStyle = dim; ctx.fillText(`$${money(l.usd)}`, 500, y)
     y += 23
@@ -1010,7 +1074,8 @@ function paint() {
     })
     if (page === 0 && !d.sold) playModel(d)
     const nextT = page < PAGES.length - 1 ? `tap: ${PAGES[page + 1].toLowerCase()}` : 'tap: feed'
-    put(5, 'foot', tip || `swipe up: more   ${nextT}   2×: feed   hold: ${token ? 'send' : 'link'}`, tip ? 4 : 1)
+    const atEnd = fpage > 0 && fullRows(fpage) > ROWS && fscroll + ROWS >= fullRows(fpage)
+    put(5, 'foot', tip || `swipe up: ${atEnd ? 'from top' : 'more'}   ${nextT}   2×: feed   hold: ${token ? 'send' : 'link'}`, tip ? 4 : 1)
     return
   }
   if (view === 'detail') {
@@ -1084,6 +1149,10 @@ async function poll() {
     } else if (hot && !asleep && view === 'glance' && !confirmDeal && Date.now() - lastActive > 8000) {      // a very strong fresh deal jumps to the screen
       idx = Math.max(0, deals.indexOf(hot)); fresh = 0
       hotId = hot.id; hotUntil = Date.now() + 10000
+    } else if (view === 'history' && curDeal) {          // reading the full info: the gift must not change under you
+      const j = deals.findIndex((d) => d.id === curDeal.id)
+      if (j < 0) { deals = [curDeal, ...deals]; idx = 0 } else idx = j
+      fresh += known.size ? added : 0
     } else if (idx > 0 && cur) {                         // keep your place while you browse older deals
       const j = deals.findIndex((d) => d.id === cur)
       idx = j >= 0 ? j : 0
@@ -1163,13 +1232,15 @@ function fullRows(page: number): number {
   const d = deals[Math.min(idx, deals.length - 1)]
   const f = d && fullCache.get(d.id)?.v
   if (!f || f === 'loading' || f === 'error') return 0
-  return page === 1 ? f.history.items.length : page === 2 ? f.on_sale.length + 1 : 0
+  const t = tableRows(d, f)
+  return page === 1 ? t.sales.length : page === 2 ? t.lots.length : 0
 }
 function fullStep(dir: 1 | -1) {
   const STEP = 3, rows = fullRows(fpage)
   if (dir > 0) {
     if (fpage > 0 && fscroll + ROWS < rows) fscroll += STEP            // more rows below on this page
-    else if (fpage < PAGES.length - 1) { fpage++; fscroll = 0 }          // next page
+    else if (fpage > 0 && rows > ROWS) fscroll = 0                       // end of a long table: from its top again (owner 27.11); other page — tap
+    else if (fpage < PAGES.length - 1) { fpage++; fscroll = 0 }          // GIFT or a short table: next page
     else return
   } else {
     if (fpage > 0 && fscroll > 0) fscroll = Math.max(0, fscroll - STEP)
