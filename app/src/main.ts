@@ -1,7 +1,7 @@
 // TeleGift Glance — underpriced Telegram Gifts on Even Realities G2.
 // Read: the freshest gift listing that sells far below the top sale of its model + backdrop.
 // Write: one tap sends the deal to your Telegram via our bot (with an "Open gift" button to buy on the phone).
-//   double tap (or swipe down / up) — next / previous deal · tap — send to Telegram · hold — more · Menu — exit
+//   swipe down / up — next / previous deal · tap — full gift info · double tap — watch the lot · hold — send to Telegram · Menu — exit
 //   (in the simulator Up/Down rarely reach the app, so the next deal is on the double tap; exit is in the system Menu)
 import {
   waitForEvenAppBridge,
@@ -983,7 +983,7 @@ function paint() {
       return c
     })
     if (!d.sold) playModel(d)
-    put(5, 'foot', tip || (d.sold ? 'tap: next deal' : `tap: full info    ${token ? 'hold: send' : 'hold: link Telegram'}    2× tap: next`), tip ? 4 : 1)
+    put(5, 'foot', tip || (d.sold ? 'tap: next deal    swipe: next' : `swipe: next   tap: info   2×: ${watched.has(d.id) ? 'watching' : 'watch'}   hold: ${token ? 'send' : 'link'}`), tip ? 4 : 1)
     return
   }
   if (view === 'history') {
@@ -1117,13 +1117,13 @@ async function startPairing() {
 async function watchCurrent() {
   const d = deals[idx]
   if (!d) return
-  if (!token) { view = 'card'; startPairing(); return }
-  if (watched.has(d.id)) return
+  if (!token) { startPairing(); return }
+  if (watched.has(d.id)) { toast('Already watching this lot'); return }
   try {
     const r = await fetch(`${API}/watch`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token, item: d }),
     })
-    if (r.ok) { watched.add(d.id); toast('Watching — the bot will write if it gets cheaper or is sold') } else toast('Could not set the watch')
+    if (r.ok) { watched.add(d.id); toast('Watching: the bot writes if it gets cheaper or sells') } else toast('Could not set the watch')
   } catch { toast('No connection. Hold to retry.') }
 }
 
@@ -1169,8 +1169,10 @@ bridge.onEvenHubEvent((event) => {
   }
   if (is(OsEventTypeList.DOUBLE_CLICK_EVENT)) {          // double tap: next deal (wraps to the freshest); no deals — exit
     if (view === 'history') { view = 'glance'; paint(); return }       // in the full info: straight back to the feed
-    if (mode === 'deals' && deals.length) {
-      view = 'glance'; idx = idx < deals.length - 1 ? idx + 1 : 0; if (idx === 0) fresh = 0; paint(); return
+    if (mode === 'deals' && deals.length) {        // in the feed: watch this lot (deals are flipped by swipes now)
+      const d = deals[Math.min(idx, deals.length - 1)]
+      if (d.sold) { idx = idx < deals.length - 1 ? idx + 1 : 0; paint(); return }
+      watchCurrent(); return
     }
     bridge.shutDownPageContainer(1); return
   }
