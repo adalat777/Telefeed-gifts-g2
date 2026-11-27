@@ -506,11 +506,10 @@ function when(ts: number) {
 const histPrice = (cur: string, p: number) => (cur === 'STARS' ? `${num(p)} ★` : `${p < 100 ? +p.toFixed(2) : Math.round(p)} GRAM`)
 
 function drawHistory(ctx: CanvasRenderingContext2D, d: Deal, h: Hist | 'loading' | 'error' | undefined) {
-  header(ctx, `${d.title} #${d.num}`)
+  ctx.font = `500 13px ${FONT}`
+  header(ctx, fit(ctx, `${d.title} #${d.num} · ${d.model} · ${d.backdrop}`, W - 140))
   ctx.textBaseline = 'alphabetic'
   ctx.font = `700 15px ${FONT}`; ctx.fillStyle = C.text; ctx.fillText('SALES HISTORY', 12, 56)
-  ctx.font = `500 13px ${FONT}`; ctx.fillStyle = C.dim
-  ctx.fillText(fit(ctx, `${d.model} · ${d.backdrop}`, 200), 142, 56)
   if (!h || h === 'loading' || h === 'error') {
     ctx.font = `600 18px ${FONT}`; ctx.fillStyle = C.text
     ctx.fillText(h === 'error' ? 'No connection to the sales data' : 'Loading sales…', 12, 130)
@@ -518,6 +517,7 @@ function drawHistory(ctx: CanvasRenderingContext2D, d: Deal, h: Hist | 'loading'
   }
   // the summary: usual price, the top sale, how lively the market is
   const sum: string[] = []
+  if (d.usd) sum.push(`this lot $${money(d.usd)}`)
   if (h.usual_usd) sum.push(`usual $${money(h.usual_usd)}`)
   if (h.top && h.top.usd) sum.push(`top $${money(h.top.usd)}`)
   sum.push(`${h.week} this week`)
