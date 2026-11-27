@@ -301,7 +301,7 @@ class TestOpenInTeleFeed(unittest.TestCase):
 
 
 class TestInline(unittest.TestCase):
-    def test_inline_matches_words_and_sorts_by_x(self):
+    def test_inline_matches_words_newest_first(self):
         items = [
             {"id": "PlushPepe-412", "title": "Plush Pepe", "num": 412, "model": "Aqua", "backdrop": "Black", "x": 2.1,
              "price": 900, "cur": "STARS", "usd": 13.5, "market": "telegram"},
@@ -314,6 +314,6 @@ class TestInline(unittest.TestCase):
         r = server.inline_results("plush black", items)
         self.assertEqual([x["id"] for x in r], ["PlushPepe-412", "PlushPepe-7"])     # newest first, like the live feed
         self.assertTrue(r[0]["description"].startswith("12 s ago"))
-        self.assertIn("https://t.me/nft/PlushPepe-7", r[0]["input_message_content"]["message_text"])
+        self.assertIn("https://t.me/nft/PlushPepe-412", r[0]["input_message_content"]["message_text"])
         self.assertEqual(server.inline_results("#412", items)[0]["id"], "PlushPepe-412")
         self.assertEqual(len(server.inline_results("", items)), 2)          # sold lots are not offered
