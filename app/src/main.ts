@@ -160,7 +160,7 @@ async function stillPicture(title: string, model: string): Promise<HTMLCanvasEle
 const ANIM_FRAMES = 90                           // up to 30 frames a second of a 3 s animation
 // The gift's symbols behind the model (owner 27.11): the 'Pattern' layer of the same Fragment animation, on the same canvas
 // and cut with the same crop as the model — so size and places are 1 in 1 as on the official card; drawn faintly.
-const PATTERN_GRAY = 30                          // the lens lifts darks: 40 shows as a quiet gray
+const PATTERN_GRAY = 20                          // the lens lifts darks: 40 shows as a quiet gray
 const PATTERN_VIEW = 1                           // the whole card: model 30 % smaller than the tight crop, all symbols as on the official card (owner 27.11)
 async function patternLayer(slug: string, w: number, h: number): Promise<HTMLCanvasElement | null> {
   try {
