@@ -472,7 +472,7 @@ def check_watches():
                     if w.get("stars") and now_st and now_st <= w["stars"] * 0.97:
                         msg = f"📉 {name} got cheaper: {w['stars']} ⭐ → {now_st} ⭐"
                     elif w.get("ton") and now_ton and now_ton <= w["ton"] * 0.97:
-                        msg = f"📉 {name} got cheaper: {w['ton']} GRAM → {round(now_ton, 2)} GRAM"
+                        msg = f"📉 {name} got cheaper: {round(w['ton'], 2)} GRAM → {round(now_ton, 2)} GRAM"
                 if not msg:
                     continue
                 params = {"chat_id": chat, "text": msg + "\n\nData, not financial advice."}
@@ -522,7 +522,7 @@ def signals(limit=20, minutes=60):
         res = h.get("resale") or {}
         ton_first = d.get("ton_only") or d.get("market") not in (None, "telegram")
         if ton_first and d.get("ton") is not None:
-            price, cur, usd = d["ton"], "GRAM", (d["ton"] * usd_rate if usd_rate else None)
+            price, cur, usd = round(d["ton"], 2), "GRAM", (d["ton"] * usd_rate if usd_rate else None)
         else:
             price, cur, usd = d.get("stars"), "STARS", (d["stars"] * STAR_USD if d.get("stars") else None)
         floor = res.get("floor")

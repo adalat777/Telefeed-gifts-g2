@@ -365,7 +365,8 @@ function fit(ctx: CanvasRenderingContext2D, text: string, max: number) {
 const money = (v: number) => (v < 100 ? v.toFixed(2).replace(/\.00$/, '') : String(Math.round(v)))
 const xs = (x: number) => x.toFixed(2).replace(/\.?0+$/, '')   // 2.00 → 2, 2.10 → 2.1, 2.22 → 2.22
 const usd = (v: number | null) => (v == null ? '' : `≈ $${v < 100 ? v.toFixed(2).replace(/\.00$/, '') : Math.round(v)}`)
-const priceText = (d: Deal) => (d.cur === 'STARS' ? `${num(d.price)} ★` : `${d.price < 100 ? d.price : Math.round(d.price)} GRAM`)
+// GRAM: at most 2 decimals
+const priceText = (d: Deal) => (d.cur === 'STARS' ? `${num(d.price)} ★` : `${d.price < 100 ? +d.price.toFixed(2) : Math.round(d.price)} GRAM`)
 
 function header(ctx: CanvasRenderingContext2D, right: string) {
   ctx.textBaseline = 'alphabetic'
