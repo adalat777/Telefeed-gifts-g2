@@ -892,28 +892,28 @@ function drawGlance(ctx: CanvasRenderingContext2D, d: Deal, pic: HTMLCanvasEleme
   }
   if (pic) ctx.drawImage(pic, 10, 28)
   const x = 240
+  // Layout B (owner 27.11 «цена наверху»): dollars big on top → the price in its own currency · market · age →
+  // name → model · backdrop → "↗ N×" with the money words in small caps → signals
   const rs = d.resell && d.resell.profit_usd > 0.5 ? d.resell : null
-  ctx.fillStyle = '#fff'; ctx.font = `800 62px ${FONT}`
-  ctx.fillText(rs ? `+$${money(rs.profit_usd)}` : `↗ ${xs(d.x)}×`, x - 3, 104)
-  // the money line: what you would make on a resale, and how far below the usual price this lot is
+  ctx.fillStyle = '#fff'; ctx.font = `800 56px ${FONT}`
+  ctx.fillText(fit(ctx, d.usd ? `$${money(d.usd)}` : priceText(d), W - x - 12), x - 2, 90)
+  ctx.font = `600 17px ${FONT}`; ctx.fillStyle = G_MID
+  ctx.fillText(fit(ctx, `${priceText(d)}  ·  ${MARKET[d.market] || d.market}  ·  ${ago(liveAge(d))}`, W - x - 12), x, 116)
+  ctx.fillStyle = C.text
+  titleLine(ctx, d, x, 153, W - x - 12, `700 23px ${FONT}`, `400 21px ${FONT}`)
+  ctx.font = `400 15px ${FONT}`; ctx.fillStyle = G_MID
+  ctx.fillText(fit(ctx, `${d.model} · ${d.backdrop}`, W - x - 12), x, 177)
+  // the "×" and, after it in small caps, what you would make on a resale / how far below the usual price
+  ctx.font = `800 23px ${FONT}`; ctx.fillStyle = '#fff'
+  const xt = `↗ ${xs(d.x)}×`
+  ctx.fillText(xt, x, 211)
+  const xw = ctx.measureText(xt).width + 10
   const below = d.fair && d.stars && d.stars < d.fair ? Math.round((1 - d.stars / d.fair) * 100) : 0
   const parts: string[] = []
-  if (rs) parts.push(`sell ~${num(rs.sell)} ★ → you +${Math.round((rs.profit_usd / Math.max(0.01, rs.cost_usd)) * 100)}%`)
+  if (rs) parts.push(`sell ~${num(rs.sell)} ★ → +${Math.round((rs.profit_usd / Math.max(0.01, rs.cost_usd)) * 100)}%`)
   if (below >= 5) parts.push(`${below}% below market`)
-  else if (d.fair && !rs) parts.push(`usual price ${num(d.fair)} ★`)
-  if (rs && !below) parts.push(`↗ ${xs(d.x)}× vs top sale`)
-  if (parts.length) capsText(ctx, parts.join('  ·  '), x, 126, W - x - 12, `600 12px ${FONT}`, G_MID)
-  ctx.fillStyle = C.text
-  titleLine(ctx, d, x, 160, W - x - 12, `700 23px ${FONT}`, `400 21px ${FONT}`)
-  ctx.font = `400 15px ${FONT}`; ctx.fillStyle = G_MID
-  ctx.fillText(fit(ctx, `${d.model} · ${d.backdrop}`, W - x - 12), x, 184)
-  // price bright; when and where — one step dimmer on the same line
-  ctx.font = `600 16px ${FONT}`; ctx.fillStyle = C.text
-  const price = `${priceText(d)}  ${usd(d.usd)}`
-  ctx.fillText(fit(ctx, price, W - x - 12), x, 216)
-  const after = ctx.measureText(price).width
-  ctx.font = `400 15px ${FONT}`; ctx.fillStyle = G_MID
-  if (after < W - x - 40) ctx.fillText(fit(ctx, `  ·  ${ago(liveAge(d))}  ·  ${MARKET[d.market] || d.market}`, W - x - 12 - after), x + after, 216)
+  else if (d.fair && !rs) parts.push(`usual ${num(d.fair)} ★`)
+  if (parts.length) capsText(ctx, parts.join('  ·  '), x + xw, 210, W - x - xw - 12, `600 12px ${FONT}`, G_MID)
   // one quiet line of signals: competition and how such resales usually end
   const sig: string[] = []
   if (d.cheapest) sig.push('cheapest on sale')
