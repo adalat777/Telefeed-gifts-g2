@@ -21,7 +21,7 @@ to keep a phone in hand and refresh marketplaces all day.
 
 ## Who it is for
 
-Telegram Gift collectors and resellers who want to catch good listings without staring at their phone — at work,
+Telegram Gift flippers who want to catch good listings without staring at their phone — at work,
 walking, or during a meeting.
 
 ## How it works
