@@ -256,6 +256,12 @@ INLINE_MAX = 20
 MINIAPP_SHORT = os.environ.get("MINIAPP_SHORT", "")      # Mini App short name from @BotFather /newapp (t.me/<bot>/<short>)
 
 
+def ago(sec):
+    """How long ago the lot came into the live feed: 12 s / 4 min / 2 h."""
+    sec = max(0, int(sec or 0))
+    return f"{sec} s ago" if sec < 60 else f"{sec // 60} min ago" if sec < 3600 else f"{sec // 3600} h ago"
+
+
 def inline_results(query, items):
     words = [w for w in re.split(r"\s+", (query or "").lower().replace("#", " ")) if w]
     hits = []
@@ -265,7 +271,7 @@ def inline_results(query, items):
         hay = " ".join(str(it.get(k) or "") for k in ("title", "model", "backdrop", "pattern", "num")).lower()
         if all(w in hay for w in words):
             hits.append(it)
-    hits.sort(key=lambda it: -(it.get("x") or 0))
+    hits.sort(key=lambda it: it.get("seen_s") or 0)         # owner 27.11: like the live feed — newest first
     out = []
     for it in hits[:INLINE_MAX]:
         slug = str(it.get("id") or "")
@@ -279,7 +285,8 @@ def inline_results(query, items):
         out.append({
             "type": "article", "id": slug[:64],
             "title": f"{it.get('title')} #{it.get('num')} · ↗ {it.get('x')}×",
-            "description": f"{price}{usd} · {MARKET.get(it.get('market'), it.get('market'))} · {it.get('model')} · {it.get('backdrop')}",
+            "description": f"{ago(it.get('seen_s'))} · {price}{usd} · {MARKET.get(it.get('market'), it.get('market'))} · "
+                           f"{it.get('model')} · {it.get('backdrop')}",
             "thumbnail_url": f"https://nft.fragment.com/gift/{slug.lower()}.small.jpg",
             "input_message_content": {"message_text": deal_text(it, "via TeleGift · data, not financial advice")
                                       + f"\nhttps://t.me/nft/{slug}"},
@@ -294,7 +301,7 @@ def on_inline(q):
     except Exception:
         items = []
     res = inline_results(q.get("query", ""), items)
-    params = {"inline_query_id": q["id"], "results": res, "cache_time": 30, "is_personal": False}
+    params = {"inline_query_id": q["id"], "results": res, "cache_time": 1, "is_personal": False}
     if not res:
         params["button"] = {"text": "No deals match — open the bot", "start_parameter": "inline"}
     try:

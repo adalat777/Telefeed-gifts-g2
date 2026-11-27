@@ -310,8 +310,10 @@ class TestInline(unittest.TestCase):
             {"id": "ViceCream-1", "title": "Vice Cream", "num": 1, "model": "Iceman", "backdrop": "Black", "x": 9,
              "price": 100, "cur": "STARS", "market": "telegram", "sold": True},
         ]
+        items[0]["seen_s"], items[1]["seen_s"] = 12, 300
         r = server.inline_results("plush black", items)
-        self.assertEqual([x["id"] for x in r], ["PlushPepe-7", "PlushPepe-412"])
+        self.assertEqual([x["id"] for x in r], ["PlushPepe-412", "PlushPepe-7"])     # newest first, like the live feed
+        self.assertTrue(r[0]["description"].startswith("12 s ago"))
         self.assertIn("https://t.me/nft/PlushPepe-7", r[0]["input_message_content"]["message_text"])
         self.assertEqual(server.inline_results("#412", items)[0]["id"], "PlushPepe-412")
         self.assertEqual(len(server.inline_results("", items)), 2)          # sold lots are not offered
