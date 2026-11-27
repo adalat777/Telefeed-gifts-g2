@@ -17,7 +17,7 @@ BACK="" APP="" SIM="" CF=""
 log() { echo "$(date +%H:%M:%S) $*"; }
 start_back() { (cd "$ROOT/backend" && exec "$PY" server.py) & BACK=$!; }
 start_app()  { (cd "$ROOT/app" && exec npx vite --clearScreen false) & APP=$!; }
-start_sim()  { [ "${NO_SIM:-}" = 1 ] && return; (cd "$ROOT/app" && sleep 3 && exec npx evenhub-simulator http://localhost:5173) & SIM=$!; }
+start_sim()  { [ "${NO_SIM:-}" = 1 ] && return; (cd "$ROOT/app" && sleep 3 && exec npx evenhub-simulator http://localhost:5173 --automation-port 9898) & SIM=$!; }
 start_cf() {
   [ -x "$ROOT/cloudflared" ] || return
   "$ROOT/cloudflared" tunnel --url http://localhost:8090 > "$ROOT/cloudflared.log" 2>&1 & CF=$!
@@ -68,4 +68,5 @@ while true; do
   fi
   kill -0 "$BACK" 2>/dev/null || { log "backend stopped — starting again"; start_back; }
   kill -0 "$APP" 2>/dev/null || { log "app stopped — starting again"; start_app; }
+  pgrep -f evenhub-simulator >/dev/null || { [ "${NO_SIM:-}" = 1 ] || { log "simulator closed — opening again"; start_sim; }; }
 done
