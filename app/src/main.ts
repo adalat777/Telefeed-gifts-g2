@@ -803,6 +803,16 @@ function drawDetail(ctx: CanvasRenderingContext2D, d: Deal, det: Detail | 'loadi
   ctx.textBaseline = 'middle'; ctx.fillText(label, RX + 13, 235.5); ctx.textBaseline = 'alphabetic'
 }
 
+// Glance type (owner 27.11, variants 2 + 4): three brightness levels — only the ×, the name and the price are bright;
+// service lines are small caps with letter spacing, like an instrument panel. The lens brightens grays, hence dark values.
+const G_MID = '#5c5c5c', G_DIM = '#262626'
+function capsText(ctx: CanvasRenderingContext2D, text: string, x: number, y: number, max: number, font: string, color: string) {
+  ctx.font = font; ctx.fillStyle = color
+  const c = ctx as CanvasRenderingContext2D & { letterSpacing?: string }
+  c.letterSpacing = '1.4px'
+  ctx.fillText(fit(ctx, text.toUpperCase(), max), x, y)
+  c.letterSpacing = '0px'
+}
 function drawGlance(ctx: CanvasRenderingContext2D, d: Deal, pic: HTMLCanvasElement | null, pos: string) {
   // one look is enough: the money, the gift, how fresh — everything else is one hold away
   const hot = d.id === hotId && Date.now() < hotUntil
@@ -828,26 +838,25 @@ function drawGlance(ctx: CanvasRenderingContext2D, d: Deal, pic: HTMLCanvasEleme
   if (below >= 5) parts.push(`${below}% below market`)
   else if (d.fair && !rs) parts.push(`usual price ${num(d.fair)} ★`)
   if (rs && !below) parts.push(`↗ ${xs(d.x)}× vs top sale`)
-  if (parts.length) {
-    ctx.font = `700 14px ${FONT}`; ctx.fillStyle = C.text
-    ctx.fillText(fit(ctx, parts.join('  ·  '), W - x - 12), x, 126)
-  }
+  if (parts.length) capsText(ctx, parts.join('  ·  '), x, 126, W - x - 12, `600 12px ${FONT}`, G_MID)
   ctx.fillStyle = C.text
-  titleLine(ctx, d, x, 160, W - x - 12, `800 23px ${FONT}`, `800 21px ${FONT}`)
-  ctx.font = `500 15px ${FONT}`; ctx.fillStyle = C.dim
+  titleLine(ctx, d, x, 160, W - x - 12, `700 23px ${FONT}`, `400 21px ${FONT}`)
+  ctx.font = `400 15px ${FONT}`; ctx.fillStyle = G_MID
   ctx.fillText(fit(ctx, `${d.model} · ${d.backdrop}`, W - x - 12), x, 184)
-  ctx.font = `700 16px ${FONT}`; ctx.fillStyle = C.text
-  ctx.fillText(fit(ctx, `${priceText(d)}  ${usd(d.usd)}  ·  ${ago(liveAge(d))}  ·  ${MARKET[d.market] || d.market}`, W - x - 12), x, 216)
+  // price bright; when and where — one step dimmer on the same line
+  ctx.font = `600 16px ${FONT}`; ctx.fillStyle = C.text
+  const price = `${priceText(d)}  ${usd(d.usd)}`
+  ctx.fillText(fit(ctx, price, W - x - 12), x, 216)
+  const after = ctx.measureText(price).width
+  ctx.font = `400 15px ${FONT}`; ctx.fillStyle = G_MID
+  if (after < W - x - 40) ctx.fillText(fit(ctx, `  ·  ${ago(liveAge(d))}  ·  ${MARKET[d.market] || d.market}`, W - x - 12 - after), x + after, 216)
   // one quiet line of signals: competition and how such resales usually end
   const sig: string[] = []
   if (d.cheapest) sig.push('cheapest on sale')
   else if (d.floor) sig.push(`on sale from ${num(d.floor)} ★`)
   if (d.rs_good && d.rs_pct) sig.push(`★ ${Math.round(d.rs_pct * 100)}% of resales in profit`)
   else if (d.sales) sig.push(`${num(d.sales)} sales`)
-  if (sig.length) {
-    ctx.font = `500 13px ${FONT}`; ctx.fillStyle = C.dim
-    ctx.fillText(fit(ctx, sig.join('  ·  '), W - x - 12), x, 242)
-  }
+  if (sig.length) capsText(ctx, sig.join('  ·  '), x, 242, W - x - 12, `600 11px ${FONT}`, G_DIM)
   if (d.sold) {
     ctx.fillStyle = '#000'; ctx.fillRect(0, 36, W, H - 36)
     ctx.save(); ctx.translate(W / 2, 120); ctx.rotate(-0.12)
