@@ -19,6 +19,7 @@ import random
 import re
 import secrets
 import sqlite3
+import ssl
 import threading
 import time
 import urllib.parse
@@ -47,6 +48,20 @@ def load_env_token():
 
 
 BOT = load_env_token()
+
+
+def _ssl_context():
+    """System CAs + certifi (python.org Python on macOS has no system CAs by default)."""
+    ctx = ssl.create_default_context()
+    try:
+        import certifi
+        ctx.load_verify_locations(cafile=certifi.where())
+    except Exception:
+        pass
+    return ctx
+
+
+SSL = _ssl_context()
 _lock = threading.Lock()
 _pending = {}            # code -> {"at": ts, "token": None|str}
 _pairs = {}              # token -> chat_id
@@ -72,7 +87,7 @@ def tg(method, params=None, timeout=35):
     data = urllib.parse.urlencode({k: (json.dumps(v) if isinstance(v, (dict, list)) else v)
                                    for k, v in (params or {}).items()}).encode()
     req = urllib.request.Request(f"https://api.telegram.org/bot{BOT}/{method}", data=data)
-    with urllib.request.urlopen(req, timeout=timeout) as r:
+    with urllib.request.urlopen(req, timeout=timeout, context=SSL) as r:
         return json.loads(r.read().decode())
 
 
