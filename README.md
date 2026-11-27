@@ -40,9 +40,9 @@ while you are reading the full info or touched the glasses in the last 8 s). If 
 
 | Gesture | Feed (the deal) | Full info (GIFT → SALES → ON SALE) |
 |---|---|---|
-| swipe up | next deal | scroll back; above GIFT — back to the feed |
-| swipe down | previous deal | scroll down the lists; at the end of a table — from its top again |
-| tap | open the full info | next page; after ON SALE — back to the feed |
+| swipe up | next deal | scroll back; at the top of a page — back to the feed |
+| swipe down | previous deal | scroll down the table (inside the page); at its end — from the top again |
+| tap | open the full info | next page; on ON SALE — a menu: from the start (GIFT) or back to the feed |
 | double tap | **watch** this lot (the bot writes if it gets cheaper or sells) | back to the feed |
 | hold | **send** the deal to your Telegram | send the deal to your Telegram |
 | Menu (system) | exit | exit |

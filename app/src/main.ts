@@ -497,6 +497,21 @@ type Full = { floor_col: Floor; floor_model: Floor; floor_backdrop?: Floor; issu
 const fullCache = new Map<string, { at: number; v: Full | 'loading' | 'error' }>()
 const PAGES = ['GIFT', 'SALES', 'ON SALE']
 let fpage = 0, fscroll = 0
+// tap on the last page (ON SALE) asks where to go (owner 27.11): 0 — from the start (GIFT), 1 — back to the feed
+let endMenu: 0 | 1 | null = null
+const END_ITEMS = ['↺  From the start  ·  GIFT', '←  Back to the feed']
+function drawEndMenu(ctx: CanvasRenderingContext2D) {
+  const w = 330, h = 116, x = (W - w) / 2, y = 70
+  rrect(ctx, x, y, w, h, 14); ctx.fillStyle = '#000'; ctx.fill(); ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.5; ctx.stroke()
+  ctx.textBaseline = 'middle'
+  END_ITEMS.forEach((t, i) => {
+    const ry = y + 14 + i * 46
+    if (i === endMenu) { rrect(ctx, x + 12, ry, w - 24, 38, 10); ctx.fillStyle = '#fff'; ctx.fill(); ctx.fillStyle = '#000' }
+    else ctx.fillStyle = G_MID
+    ctx.font = `700 17px ${FONT}`; ctx.fillText(t, x + 26, ry + 20)
+  })
+  ctx.textBaseline = 'alphabetic'
+}
 const ROWS = 7
 
 async function loadFull(d: Deal) {
@@ -1074,12 +1089,15 @@ function paint() {
         drawInfo(ctx, d, f?.v, frames ? frames[animStep] : restFrame.get(d.id) || await modelPicture(d.title, d.model, GLANCE_PX))
       } else if (page === 1) drawSales(ctx, d, f?.v)
       else drawOnSale(ctx, d, f?.v)
+      if (endMenu !== null) drawEndMenu(ctx)
       return c
     })
     if (page === 0 && !d.sold) playModel(d)
-    const nextT = page < PAGES.length - 1 ? `tap: ${PAGES[page + 1].toLowerCase()}` : 'tap: feed'
+    const nextT = page < PAGES.length - 1 ? `tap: ${PAGES[page + 1].toLowerCase()}` : 'tap: back'
+    if (endMenu !== null && !tip) { put(5, 'foot', 'SWIPE: CHOOSE  ·  TAP: OK  ·  2×: FEED', HINT_COLOR); return }
     const atEnd = fpage > 0 && fullRows(fpage) > ROWS && fscroll + ROWS >= fullRows(fpage)
-    put(5, 'foot', tip || hint(`swipe down: ${atEnd ? 'from top' : 'more'}   ${nextT}   2×: feed   hold: ${token ? 'send' : 'link'}`), tip ? 4 : HINT_COLOR)
+    const scrolls = fpage > 0 && fullRows(fpage) > ROWS
+    put(5, 'foot', tip || hint(`${scrolls ? `swipe down: ${atEnd ? 'from top' : 'more'}   ` : ''}${nextT}   2×: feed   hold: ${token ? 'send' : 'link'}`), tip ? 4 : HINT_COLOR)
     return
   }
   if (view === 'detail') {
@@ -1239,17 +1257,17 @@ function fullRows(page: number): number {
   const t = tableRows(d, f)
   return page === 1 ? t.sales.length : page === 2 ? t.lots.length : 0
 }
+// Swipes stay inside the current page (owner 27.11 «1 и 2»): down — further down the table (at the end of a long one —
+// from its top again), up — back; up at the top of a page — to the feed. Pages change only by tap; 2× tap — the feed.
 function fullStep(dir: 1 | -1) {
   const STEP = 3, rows = fullRows(fpage)
   if (dir > 0) {
-    if (fpage > 0 && fscroll + ROWS < rows) fscroll += STEP            // more rows below on this page
-    else if (fpage > 0 && rows > ROWS) fscroll = 0                       // end of a long table: from its top again (owner 27.11); other page — tap
-    else if (fpage < PAGES.length - 1) { fpage++; fscroll = 0 }          // GIFT or a short table: next page
-    else return
+    if (fpage > 0 && fscroll + ROWS < rows) fscroll += STEP            // more rows below
+    else if (fpage > 0 && rows > ROWS) fscroll = 0                       // end of a long table: from its top again
+    else return                                                          // GIFT or a short table: nothing to scroll
   } else {
     if (fpage > 0 && fscroll > 0) fscroll = Math.max(0, fscroll - STEP)
-    else if (fpage > 0) { fpage--; fscroll = fpage ? Math.max(0, fullRows(fpage) - ROWS) : 0 }   // previous page, at its end
-    else { view = 'glance' }                                             // above GIFT: back to the feed
+    else view = 'glance'                                                 // top of the page: back to the feed
   }
   paint()
 }
@@ -1287,7 +1305,7 @@ bridge.onEvenHubEvent((event) => {
     return
   }
   if (is(OsEventTypeList.DOUBLE_CLICK_EVENT)) {          // double tap: next deal (wraps to the freshest); no deals — exit
-    if (view === 'history') { view = 'glance'; paint(); return }       // in the full info: straight back to the feed
+    if (view === 'history') { endMenu = null; view = 'glance'; paint(); return }       // in the full info: straight back to the feed
     if (mode === 'deals' && deals.length) {        // in the feed: watch this lot (deals are flipped by swipes now)
       const d = deals[Math.min(idx, deals.length - 1)]
       if (d.sold) { idx = idx < deals.length - 1 ? idx + 1 : 0; paint(); return }
@@ -1303,6 +1321,7 @@ bridge.onEvenHubEvent((event) => {
   const fwd = is(OsEventTypeList.SCROLL_TOP_EVENT), back = is(OsEventTypeList.SCROLL_BOTTOM_EVENT)
   // in the full info it is the other way round (owner 27.11: «список спускается свайпом вниз — так естественнее»):
   // swipe DOWN goes deeper into the lists, UP goes back (above GIFT — to the feed)
+  if ((fwd || back) && view === 'history' && endMenu !== null) { endMenu = endMenu ? 0 : 1; paint(); return }
   if ((fwd || back) && view === 'history' && mode === 'deals' && deals.length) { fullStep(back ? 1 : -1); return }
   if (fwd && mode === 'deals' && deals.length) {
     idx = Math.min(deals.length - 1, idx + 1); paint(); prefetchFrames(); return
@@ -1316,10 +1335,15 @@ bridge.onEvenHubEvent((event) => {
     if (mode === 'deals' && deals.length) {          // tap: the deal <-> its sales history (back to the same deal)
       const d = deals[Math.min(idx, deals.length - 1)]
       if (d.sold && view === 'glance') { idx = idx < deals.length - 1 ? idx + 1 : 0; paint(); return }
+      if (view === 'history' && endMenu !== null) {  // the end menu: from the start or back to the feed
+        if (endMenu === 0) { fpage = 0; fscroll = 0 } else view = 'glance'
+        endMenu = null; paint(); return
+      }
+      if (view === 'history' && fpage === PAGES.length - 1) { endMenu = 0; paint(); return }
       if (view === 'history') {                      // next page; after the last one — back to the feed
         fpage++; fscroll = 0
         if (fpage >= PAGES.length) view = 'glance'
-      } else { view = 'history'; fpage = 0; fscroll = 0; loadFull(d) }
+      } else { view = 'history'; fpage = 0; fscroll = 0; endMenu = null; loadFull(d) }
       paint(); return
     }
   }
