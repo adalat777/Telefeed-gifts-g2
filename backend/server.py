@@ -519,8 +519,14 @@ def check_watches():
                 if not msg:
                     continue
                 params = {"chat_id": chat, "text": msg + "\n\nData, not financial advice."}
+                row = []
                 if not drop and w.get("url") and SAFE_URL.match(w["url"]):
-                    params["reply_markup"] = {"inline_keyboard": [[{"text": "🎁 Open gift", "url": w["url"]}]]}
+                    row.append({"text": "🎁 Open gift", "url": w["url"]})
+                ab = app_button(gid)
+                if ab:
+                    row.append(ab)
+                if row:
+                    params["reply_markup"] = {"inline_keyboard": [row]}
                 tg("sendMessage", params, 15)
                 with _lock:
                     ws = _watches.get(chat, {})
@@ -732,6 +738,15 @@ def _top_stars(rows, ok):
 
 
 TELEFEED_API = os.environ.get("TELEFEED_API", "http://127.0.0.1:8080")
+# 27.11 "Open in TeleFeed": the TeleFeed Mini App (MINIAPP_URL, https) opens right on this gift's full info window
+MINIAPP_URL = os.environ.get("MINIAPP_URL", "").rstrip("/")
+
+
+def app_button(slug):
+    """Inline button that opens TeleFeed as a Mini App on the gift (private chats only — that's where the bot writes)."""
+    if not MINIAPP_URL.startswith("https://") or not slug or not re.fullmatch(r"[A-Za-z0-9]+-\d{1,9}", slug):
+        return None
+    return {"text": "📱 Open in TeleFeed", "web_app": {"url": f"{MINIAPP_URL}/?gift={slug}"}}
 _full_cache = {}
 
 
@@ -1097,7 +1112,8 @@ class H(BaseHTTPRequestHandler):
             _items[gid] = it
             if len(_items) > 500:
                 _items.pop(next(iter(_items)))
-            rows = [[{"text": "🎁 Open gift", "url": url}]] if url else []
+            top = ([{"text": "🎁 Open gift", "url": url}] if url else []) + ([app_button(gid)] if app_button(gid) else [])
+            rows = [top] if top else []
             if gid:
                 rows.append([{"text": "📈 Price chart", "callback_data": f"chart:{gid}"},
                              {"text": "👁 Watch", "callback_data": f"watch:{gid}"}])

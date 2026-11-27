@@ -284,3 +284,17 @@ class SettingsTest(Base):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestOpenInTeleFeed(unittest.TestCase):
+    def test_app_button_only_for_gift_slugs_and_https(self):
+        old = server.MINIAPP_URL
+        try:
+            server.MINIAPP_URL = "https://x.sslip.io"
+            b = server.app_button("PlushPepe-412")
+            self.assertEqual(b["web_app"]["url"], "https://x.sslip.io/?gift=PlushPepe-412")
+            self.assertIsNone(server.app_button("addr:EQabc"))
+            server.MINIAPP_URL = ""
+            self.assertIsNone(server.app_button("PlushPepe-412"))
+        finally:
+            server.MINIAPP_URL = old
