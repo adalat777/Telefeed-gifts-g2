@@ -1,7 +1,8 @@
 // TeleGift Glance — underpriced Telegram Gifts on Even Realities G2.
 // Read: the freshest gift listing that sells far below the top sale of its model + backdrop.
 // Write: one tap sends the deal to your Telegram via our bot (with an "Open gift" button to buy on the phone).
-//   swipe down / up — next / previous deal · tap — send to Telegram · double tap — exit
+//   double tap (or swipe down / up) — next / previous deal · tap — send to Telegram · hold — more · Menu — exit
+//   (in the simulator Up/Down rarely reach the app, so the next deal is on the double tap; exit is in the system Menu)
 import {
   waitForEvenAppBridge,
   TextContainerProperty,
@@ -567,7 +568,7 @@ function paint() {
   if (confirmDeal && Date.now() < confirmUntil) {
     const cd = confirmDeal
     show(async () => { const { c, ctx } = blank(); drawConfirm(ctx, cd); return c })
-    put(5, 'foot', tip || 'swipe: next    2× tap: exit', tip ? 4 : 1)
+    put(5, 'foot', tip || '2× tap: next', tip ? 4 : 1)
     return
   }
   const d = deals[Math.min(idx, total - 1)]
@@ -583,7 +584,7 @@ function paint() {
       drawGlance(ctx, d, await modelPicture(d.title, d.model, MODEL_PX), pos)
       return c
     })
-    put(5, 'foot', tip || (d.sold ? 'tap: next deal' : `${token ? 'tap: send' : 'tap: link Telegram'}    hold: more    swipe: next`), tip ? 4 : 1)
+    put(5, 'foot', tip || (d.sold ? 'tap: next deal' : `${token ? 'tap: send' : 'tap: link Telegram'}    2× tap: next    hold: more`), tip ? 4 : 1)
     return
   }
   if (view === 'detail') {
@@ -600,7 +601,7 @@ function paint() {
     drawDeal(ctx, d, pic, back, pos)
     return c
   })
-  put(5, 'foot', tip || 'swipe: next    hold: chart    2× tap: back', tip ? 4 : 1)
+  put(5, 'foot', tip || '2× tap: next    hold: chart', tip ? 4 : 1)
 }
 
 function toast(t: string, ms = 2500) {
@@ -749,8 +750,10 @@ bridge.onEvenHubEvent((event) => {
     if (mode === 'deals' && deals.length) { view = view === 'glance' ? 'card' : view === 'card' ? 'detail' : 'glance'; paint() }
     return
   }
-  if (is(OsEventTypeList.DOUBLE_CLICK_EVENT)) {
-    if (view !== 'glance') { view = 'glance'; paint(); return }
+  if (is(OsEventTypeList.DOUBLE_CLICK_EVENT)) {          // double tap: next deal (wraps to the freshest); no deals — exit
+    if (mode === 'deals' && deals.length) {
+      view = 'glance'; idx = idx < deals.length - 1 ? idx + 1 : 0; if (idx === 0) fresh = 0; paint(); return
+    }
     bridge.shutDownPageContainer(1); return
   }
   if (view === 'detail' && (is(OsEventTypeList.SCROLL_BOTTOM_EVENT) || is(OsEventTypeList.SCROLL_TOP_EVENT))) {

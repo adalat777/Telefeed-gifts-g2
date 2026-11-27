@@ -40,8 +40,12 @@ the card gets a **SOLD** stamp and the next deal takes its place.
 |---|---|---|---|
 | tap | send the deal to Telegram | send to Telegram | watch it (bot alerts on price drop / sale) |
 | hold | open the card | open the chart | back to glance |
+| double tap | next deal | next deal | next deal |
 | swipe | next / previous deal | next / previous deal | back |
-| double tap | exit | back to glance | back to glance |
+| Menu (system) | exit | exit | exit |
+
+In the simulator Up/Down rarely reach the app (a text container reports them only at its scroll edge, and a list container
+moves its highlight without telling the app), so the next deal is on the **double tap**; on G2 swipes work as well.
 
 - **Card** — TeleGift app look: gift card with backdrop + pattern symbols, market plaque, `↗ N×`, price; on the right the
   resell estimate (usual price − 20 % Telegram fee vs. what you pay), floor / usual price, a live "listed Ns ago" timer.
