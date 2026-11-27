@@ -520,7 +520,7 @@ let asleep = false                               // quiet by default: the lens g
 let lastActive = Date.now()
 let quiet = false                                // quiet hours from the bot /settings: no pop-ups
 let filtered = false
-const AWAKE_MS = 25000
+const AWAKE_MS = 600000                           // 10 min: in the simulator only Click wakes it (swipes need a scrollable container)
 type Detail = { chart: { day: string; usd: number | null; n: number }[]; venues: { market: string; name: string; n: number; usd: number | null }[]; days: number }
 const detailCache = new Map<string, Detail | 'loading' | 'error'>()
 const watched = new Set<string>()
@@ -573,7 +573,7 @@ function paint() {
   const d = deals[Math.min(idx, total - 1)]
   if (asleep) {                                      // dark lens: nothing to look at until a matching deal comes
     show(async () => blank().c)
-    put(5, 'foot', ' ', 0)
+    put(5, 'foot', 'watching for deals · tap or swipe to wake', 0)   // the text keeps swipe events coming
     return
   }
   if (view === 'glance') {
@@ -753,13 +753,13 @@ bridge.onEvenHubEvent((event) => {
     if (view !== 'glance') { view = 'glance'; paint(); return }
     bridge.shutDownPageContainer(1); return
   }
-  if (view === 'detail' && (textType === OsEventTypeList.SCROLL_BOTTOM_EVENT || textType === OsEventTypeList.SCROLL_TOP_EVENT)) {
+  if (view === 'detail' && (is(OsEventTypeList.SCROLL_BOTTOM_EVENT) || is(OsEventTypeList.SCROLL_TOP_EVENT))) {
     view = 'card'; paint(); return
   }
-  if (textType === OsEventTypeList.SCROLL_BOTTOM_EVENT && mode === 'deals' && deals.length) {
+  if (is(OsEventTypeList.SCROLL_BOTTOM_EVENT) && mode === 'deals' && deals.length) {
     idx = Math.min(deals.length - 1, idx + 1); paint(); return
   }
-  if (textType === OsEventTypeList.SCROLL_TOP_EVENT && mode === 'deals' && deals.length) {
+  if (is(OsEventTypeList.SCROLL_TOP_EVENT) && mode === 'deals' && deals.length) {
     idx = Math.max(0, idx - 1); if (idx === 0) fresh = 0; paint(); return
   }
   if (sysType === OsEventTypeList.CLICK_EVENT || textType === OsEventTypeList.CLICK_EVENT) {
