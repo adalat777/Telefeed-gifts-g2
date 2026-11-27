@@ -31,16 +31,34 @@ TeleFeed (our data, read-only)            backend/server.py                 G2 g
 
 ### On the lens
 
-| Gesture | Action |
-|---|---|
-| swipe down / up | next / previous deal |
-| tap | send the deal to Telegram (first tap without pairing — link Telegram) |
-| double tap | exit |
+Made for a glance, not for reading. The lens stays **dark** until a deal that matches your settings arrives; then it wakes up
+with the money first: **`+$5.51` resell estimate · Mirage Lamp #35247 · 500 ★ ≈ $7.50 · 2s ago · Telegram`** and the
+gift model drawn in grayscale. A very strong deal (×3+) jumps in with a **HOT DEAL** badge. If someone buys it first,
+the card gets a **SOLD** stamp and the next deal takes its place.
 
-The screen: `Vice Cream #376568 · Iceman | Deep Cyan · 450 Stars ~ $6.75 · x2.4 vs top sale · Telegram | 1 min ago`.
-A counter shows how many new deals arrived while you were looking at an older one, so you never lose your place.
+| Gesture | Glance | Card (hold) | Chart (hold again) |
+|---|---|---|---|
+| tap | send the deal to Telegram | send to Telegram | watch it (bot alerts on price drop / sale) |
+| hold | open the card | open the chart | back to glance |
+| swipe | next / previous deal | next / previous deal | back |
+| double tap | exit | back to glance | back to glance |
+
+- **Card** — TeleGift app look: gift card with backdrop + pattern symbols, market plaque, `↗ N×`, price; on the right the
+  resell estimate (usual price − 20 % Telegram fee vs. what you pay), floor / usual price, a live "listed Ns ago" timer.
+- **Chart** — Telegram Market sales of this model + backdrop for 30 days (daily median, the deal's price dashed) and the
+  median sale price on Telegram, MRKT, Portals, Tonnel, GetGems and on-chain as bars.
+- After a tap: full-screen **✓ Sent to Telegram**, then the next deal.
+
+### In Telegram (@telefeedgifts_ai)
+
+- The deal arrives as the **gift picture** with buttons **🎁 Open gift** (buy in two taps), **📈 Price chart**, **👁 Watch**.
+- **Watch** — the bot writes when the gift gets ≥3 % cheaper or is sold.
+- **/settings** — what the glasses show: minimum resell profit ($2…$50), marketplaces, quiet hours; **/collections** —
+  only chosen collections. The glasses get only matching deals and stay dark in quiet hours.
 
 ## Run it
+
+Tests: `python3 -m unittest -v backend/test_server.py` (15 tests, no network).
 
 Requirements: Node.js 22, Python 3.10+, the Even Hub simulator (`npm i -g @evenrealities/evenhub-simulator`).
 
