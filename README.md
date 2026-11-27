@@ -57,7 +57,7 @@ npm run simulate     # Even Hub simulator
 ```
 
 Public demo backend (temporary Cloudflare quick tunnel, set in `app/.env.production` and the whitelist in
-`app/app.json`): https://theta-they-organizations-medicare.trycloudflare.com — `npm run build` / `npm run pack` use it.
+`app/app.json`): https://student-competent-cigarettes-answered.trycloudflare.com — `npm run build` / `npm run pack` use it.
 
 One command for development: `./dev.sh` — backend + app + simulator, auto-updates from GitHub every 3 s.
 
