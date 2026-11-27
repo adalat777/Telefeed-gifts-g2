@@ -1,3 +1,83 @@
-# TeleGift Glance — Telegram Gifts deals on Even Realities G2
+# TeleGift Glance — Telegram Gift deals on Even Realities G2
 
-Work in progress for the Heads Up hackathon (Nov 23–29, 2026).
+**Track 01 · Messaging (Telegram)** — Heads Up hackathon by Even Realities (Nov 23–29, 2026).
+
+Telegram Gifts (collectible NFT gifts) trade on Telegram Market, MRKT, Portals, Tonnel and on-chain marketplaces —
+about 16 000 sales a day on Telegram Market alone. Underpriced listings get bought within seconds or minutes, so a trader
+has to stare at a phone all day. **TeleGift Glance puts the deal in front of your eyes instead:** the freshest listing
+that sells far below the usual price of its model + backdrop appears on your G2 glasses. One tap sends it to your own
+Telegram chat with an **Open gift** button, so you can buy it on your phone in two taps.
+
+## How it works
+
+```
+TeleFeed (our data, read-only)            backend/server.py                 G2 glasses (app/)
+ live listings of 7 marketplaces   ──►   GET /signals  ──────────────►   deal on the lens
+ + 4.4M past sales, "×" estimate          POST /pair   ◄──  6-digit code ──  link Telegram once
+                                          POST /send   ◄──  tap ──────────   send this deal
+                                               │
+                                               ▼
+                                   Telegram bot @telefeedgifts_ai
+                                   → message in YOUR chat with "🎁 Open gift"
+```
+
+- **Read** — `/signals` returns the latest listings that our existing TeleFeed engine marked as profitable
+  (price ≥ ×1.75 below the top clean sale of the same model + backdrop; fake/outlier sales removed). Only public
+  listing data: gift name, number, model, backdrop, price, marketplace, link.
+- **Write (one tap)** — the glasses ask the backend to send the deal; our bot posts it to the Telegram chat that was
+  paired with these glasses, with an inline **Open gift** button (`t.me/nft/<gift>` or the marketplace's link).
+- **Pairing** — the glasses show a 6-digit code; you send it to [@telefeedgifts_ai](https://t.me/telefeedgifts_ai).
+  The app then gets an opaque token. The bot token and your chat id never reach the glasses.
+
+### On the lens
+
+| Gesture | Action |
+|---|---|
+| swipe down / up | next / previous deal |
+| tap | send the deal to Telegram (first tap without pairing — link Telegram) |
+| double tap | exit |
+
+The screen: `Vice Cream #376568 · Iceman | Deep Cyan · 450 Stars ~ $6.75 · x2.4 vs top sale · Telegram | 1 min ago`.
+A counter shows how many new deals arrived while you were looking at an older one, so you never lose your place.
+
+## Run it
+
+Requirements: Node.js 22, Python 3.10+, the Even Hub simulator (`npm i -g @evenrealities/evenhub-simulator`).
+
+```bash
+# 1. backend (stdlib only, no pip install)
+cd backend
+BOT_TOKEN=<token from @BotFather> TELEFEED_DB=/path/to/feed.db python3 server.py   # http://127.0.0.1:8090
+
+# 2. glasses app
+cd app
+npm install
+npm run dev          # Vite on :5173
+npm run simulate     # Even Hub simulator
+```
+
+Real glasses: `npx evenhub qr --url http://<your-ip>:5173` and scan it in the Even Hub app. To use a remote backend,
+build with `VITE_API=https://<host>` and add the host to the `network` whitelist in `app/app.json`.
+
+## Safety and privacy
+
+- **Read-only market data.** The backend opens the database with `mode=ro` and never buys, sells or touches wallets.
+- **No secrets in the repo or on the glasses.** The bot token stays in an env variable on the server; pairing tokens are
+  random 128-bit values; `pairs.json` is gitignored.
+- **Only safe links** — the "Open gift" button accepts `https://t.me/…` and `https://marketapp.org/…` only.
+- **Rate limit** — one send per 1.5 s per paired device.
+- Every message says: *Data, not financial advice.*
+
+## What existed before the hackathon
+
+The data source, **TeleFeed**, is our private project, built before Nov 23, 2026: collectors of new listings on
+Telegram Market (MTProto), MRKT, Portals, Tonnel and on-chain marketplaces, a sales history database (4.4M Telegram
+Market sales since April 2025) and the profitability estimate. It is not part of this repository.
+
+**Built during the hackathon (Nov 27–29), everything in this repo:** the G2 app (`app/`), the backend with the
+read-only signal feed, Telegram pairing and one-tap sending (`backend/server.py`), and the Telegram bot flow.
+
+## Business
+
+Free on the glasses for the hackathon. Later: a paid TeleFeed subscription (Telegram Stars or GRAM) unlocks the deal feed
+with no delay; free users see deals a couple of minutes later.
