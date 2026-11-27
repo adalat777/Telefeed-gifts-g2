@@ -423,6 +423,46 @@ function drawDetail(ctx: CanvasRenderingContext2D, d: Deal, det: Detail | 'loadi
   ctx.textBaseline = 'middle'; ctx.fillText(label, RX + 13, 235.5); ctx.textBaseline = 'alphabetic'
 }
 
+function drawGlance(ctx: CanvasRenderingContext2D, d: Deal, pic: HTMLCanvasElement | null, pos: string) {
+  // one look is enough: the money, the gift, how fresh — everything else is one hold away
+  const hot = d.id === hotId && Date.now() < hotUntil
+  ctx.textBaseline = 'alphabetic'
+  ctx.font = `800 14px ${FONT}`; ctx.fillStyle = C.dim; ctx.fillText('TELEGIFT', 12, 22)
+  ctx.font = `500 12px ${FONT}`
+  const pw = ctx.measureText(pos).width; ctx.fillText(pos, W - 12 - pw, 22)
+  if (hot) {
+    ctx.font = `900 14px ${FONT}`
+    const t = 'HOT DEAL', w = ctx.measureText(t).width + 22
+    rrect(ctx, (W - w) / 2, 6, w, 22, 11); ctx.fillStyle = '#fff'; ctx.fill()
+    ctx.fillStyle = '#000'; ctx.textBaseline = 'middle'; ctx.fillText(t, (W - w) / 2 + 11, 17.5); ctx.textBaseline = 'alphabetic'
+  }
+  if (pic) ctx.drawImage(pic, 14, 62)
+  const x = 150
+  const rs = d.resell && d.resell.profit_usd > 0.5 ? d.resell : null
+  ctx.fillStyle = '#fff'; ctx.font = `800 62px ${FONT}`
+  ctx.fillText(rs ? `+$${money(rs.profit_usd)}` : `↗ ${xs(d.x)}×`, x - 3, 104)
+  if (rs) {
+    ctx.font = `600 13px ${FONT}`; ctx.fillStyle = C.dim
+    ctx.fillText(`resell estimate · ↗ ${xs(d.x)}× vs top sale`, x, 124)
+  }
+  ctx.font = `800 23px ${FONT}`; ctx.fillStyle = C.text
+  ctx.fillText(fit(ctx, `${d.title} #${d.num}`, W - x - 12), x, 160)
+  ctx.font = `500 15px ${FONT}`; ctx.fillStyle = C.dim
+  ctx.fillText(fit(ctx, `${d.model} · ${d.backdrop}`, W - x - 12), x, 184)
+  ctx.font = `700 16px ${FONT}`; ctx.fillStyle = C.text
+  ctx.fillText(fit(ctx, `${priceText(d)}  ${usd(d.usd)}  ·  ${ago(liveAge(d))}  ·  ${MARKET[d.market] || d.market}`, W - x - 12), x, 216)
+  if (d.sold) {
+    ctx.fillStyle = '#000'; ctx.fillRect(0, 36, W, H - 36)
+    ctx.save(); ctx.translate(W / 2, 120); ctx.rotate(-0.12)
+    ctx.strokeStyle = '#fff'; ctx.lineWidth = 3; rrect(ctx, -92, -32, 184, 64, 10); ctx.stroke()
+    ctx.fillStyle = '#fff'; ctx.font = `900 44px ${FONT}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('SOLD', 0, 2)
+    ctx.restore()
+    ctx.font = `600 15px ${FONT}`; ctx.fillStyle = C.text; ctx.textAlign = 'center'
+    ctx.fillText(`${d.title} #${d.num} — someone was faster`, W / 2, 196)
+    ctx.fillStyle = C.dim; ctx.fillText('next deal in a moment…', W / 2, 220); ctx.textAlign = 'left'
+  }
+}
+
 function drawMessage(ctx: CanvasRenderingContext2D, right: string, title: string, lines: string[], big?: string) {
   header(ctx, right)
   ctx.textBaseline = 'alphabetic'
@@ -474,7 +514,13 @@ let idx = 0
 let fresh = 0                     // new deals arrived while you were looking at an older one
 let token = localStorage.getItem(TOKEN_KEY) || ''
 let mode: 'pair' | 'deals' = token ? 'deals' : 'pair'
-let view: 'card' | 'detail' = 'card'           // long press on a deal → its price chart and marketplaces
+// glance → hold → card → hold → detail (chart, marketplaces) → hold → glance
+let view: 'glance' | 'card' | 'detail' = 'glance'
+let asleep = false                               // quiet by default: the lens goes dark and wakes on a matching deal
+let lastActive = Date.now()
+let quiet = false                                // quiet hours from the bot /settings: no pop-ups
+let filtered = false
+const AWAKE_MS = 25000
 type Detail = { chart: { day: string; usd: number | null; n: number }[]; venues: { market: string; name: string; n: number; usd: number | null }[]; days: number }
 const detailCache = new Map<string, Detail | 'loading' | 'error'>()
 const watched = new Set<string>()
@@ -525,11 +571,26 @@ function paint() {
     return
   }
   const d = deals[Math.min(idx, total - 1)]
+  if (asleep) {                                      // dark lens: nothing to look at until a matching deal comes
+    show(async () => blank().c)
+    put(5, 'foot', ' ', 0)
+    return
+  }
+  if (view === 'glance') {
+    const pos = `${idx === 0 && d.seen_s < 120 ? 'NEW · ' : ''}${idx + 1}/${total}` + (fresh ? ` · +${fresh} new` : '') + (filtered ? ' · your filters' : '')
+    show(async () => {
+      const { c, ctx } = blank()
+      drawGlance(ctx, d, await modelPicture(d.title, d.model, MODEL_PX), pos)
+      return c
+    })
+    put(5, 'foot', tip || (d.sold ? 'tap: next deal' : `${token ? 'tap: send' : 'tap: link Telegram'}    hold: more    swipe: next`), tip ? 4 : 1)
+    return
+  }
   if (view === 'detail') {
     const det = detailCache.get(comboKey(d))
     if (!det) loadDetail(d)
     show(async () => { const { c, ctx } = blank(); drawDetail(ctx, d, det); return c })
-    put(5, 'foot', tip || 'swipe: back    2× tap: back', tip ? 4 : 1)
+    put(5, 'foot', tip || 'tap: watch    hold / swipe: back', tip ? 4 : 1)
     return
   }
   const pos = `${idx === 0 && d.seen_s < 120 ? 'NEW · ' : ''}deal ${idx + 1}/${total}` + (fresh ? ` · +${fresh} new` : ' · live')
@@ -539,7 +600,7 @@ function paint() {
     drawDeal(ctx, d, pic, back, pos)
     return c
   })
-  put(5, 'foot', tip || 'swipe: next    hold: chart    2× tap: exit', tip ? 4 : 1)
+  put(5, 'foot', tip || 'swipe: next    hold: chart    2× tap: back', tip ? 4 : 1)
 }
 
 function toast(t: string, ms = 2500) {
@@ -573,9 +634,10 @@ function drawConfirm(ctx: CanvasRenderingContext2D, d: Deal) {
 
 async function poll() {
   try {
-    const r = await fetch(`${API}/signals?limit=20&minutes=60`)
+    const r = await fetch(`${API}/signals?limit=20&minutes=60` + (token ? `&token=${encodeURIComponent(token)}` : ''))
     if (!r.ok) throw new Error(String(r.status))
-    const data = await r.json() as { items: Deal[]; gone?: string[] }
+    const data = await r.json() as { items: Deal[]; gone?: string[]; quiet?: boolean; filtered?: boolean }
+    quiet = !!data.quiet; filtered = !!data.filtered
     const goneSet = new Set(data.gone || [])
     const known = new Set(deals.map((d) => d.id))
     const curDeal = deals[idx]
@@ -586,7 +648,12 @@ async function poll() {
     pollAt = Date.now()
     const hot = known.size ? items.find((d) => !known.has(d.id) && d.x >= HOT_X && d.seen_s < 60) : undefined
     deals = curDeal?.sold ? [curDeal, ...items.filter((d) => d.id !== curDeal.id)] : items
-    if (hot && view === 'card' && !confirmDeal) {      // a very strong fresh deal jumps to the screen
+    const fresh1 = known.size ? items.find((d) => !known.has(d.id) && d.seen_s < 120) : undefined
+    if (asleep && fresh1 && !quiet) {                  // a new matching deal wakes the lens up
+      asleep = false; lastActive = Date.now(); view = 'glance'
+      idx = Math.max(0, deals.indexOf(fresh1)); fresh = 0
+      if (fresh1.x >= HOT_X) { hotId = fresh1.id; hotUntil = Date.now() + 10000 }
+    } else if (hot && !asleep && view !== 'detail' && !confirmDeal) {      // a very strong fresh deal jumps to the screen
       idx = Math.max(0, deals.indexOf(hot)); fresh = 0
       hotId = hot.id; hotUntil = Date.now() + 10000
     } else if (idx > 0 && cur) {                         // keep your place while you browse older deals
@@ -657,7 +724,7 @@ async function sendCurrent() {
     toastUntil = 0
     confirmDeal = d; confirmUntil = Date.now() + 2200; paint()
     setTimeout(() => {                                  // then straight to the next deal
-      confirmDeal = null
+      confirmDeal = null; view = 'glance'
       if (deals[idx]?.id === d.id && idx < deals.length - 1) idx++
       paint()
     }, 2300)
@@ -674,12 +741,16 @@ bridge.onEvenHubEvent((event) => {
   const textType = eventTypeOf(event.textEvent)
   const is = (t: OsEventTypeList) => sysType === t || textType === t
   if (is(OsEventTypeList.LONG_PRESS_RELEASE_EVENT)) return
-  if (is(OsEventTypeList.LONG_PRESS_EVENT)) {                     // hold: the deal's chart and marketplaces
-    if (mode === 'deals' && deals.length) { view = view === 'card' ? 'detail' : 'card'; paint() }
+  lastActive = Date.now()
+  if (asleep && mode === 'deals') {                   // any touch wakes the lens — show the freshest deal, do nothing else
+    asleep = false; view = 'glance'; idx = 0; fresh = 0; paint(); return
+  }
+  if (is(OsEventTypeList.LONG_PRESS_EVENT)) {          // hold: glance → card → chart → glance
+    if (mode === 'deals' && deals.length) { view = view === 'glance' ? 'card' : view === 'card' ? 'detail' : 'glance'; paint() }
     return
   }
   if (is(OsEventTypeList.DOUBLE_CLICK_EVENT)) {
-    if (view === 'detail') { view = 'card'; paint(); return }
+    if (view !== 'glance') { view = 'glance'; paint(); return }
     bridge.shutDownPageContainer(1); return
   }
   if (view === 'detail' && (textType === OsEventTypeList.SCROLL_BOTTOM_EVENT || textType === OsEventTypeList.SCROLL_TOP_EVENT)) {
@@ -702,4 +773,8 @@ paint()
 if (mode === 'pair') startPairing()
 poll()
 setInterval(poll, POLL_MS)
-setInterval(() => { if (mode === 'deals' && deals.length && !drawing) paint() }, 500)   // timer ticks, HOT blinks   // 'listed Ns ago' ticks
+setInterval(() => {
+  if (mode !== 'deals') return
+  if (!asleep && !confirmDeal && view !== 'detail' && Date.now() - lastActive > AWAKE_MS) { asleep = true; paint(); return }
+  if (deals.length && !asleep && !drawing) paint()                 // timer ticks, HOT blinks
+}, 500)   // 'listed Ns ago' ticks
