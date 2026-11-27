@@ -269,6 +269,49 @@ function pill(ctx: CanvasRenderingContext2D, x: number, y: number, text: string,
   ctx.fillStyle = color; ctx.textBaseline = 'middle'; ctx.fillText(text, px + 7, y + 10.5)
   return w
 }
+// ---------- nice gift numbers (same rules as TeleFeed: web/app.js niceNumber) ----------
+function niceNumber(n: number): string | null {
+  const s = String(n), len = s.length
+  const run = () => { let up = true, down = true; for (let i = 1; i < len; i++) { const k = s.charCodeAt(i) - s.charCodeAt(i - 1); if (k !== 1) up = false; if (k !== -1) down = false } return up || down }
+  if (n <= 100) return 'under 100'
+  if (len >= 3 && /^(\d)\1+$/.test(s)) return 'same digits'
+  if (len >= 3 && /^[1-9]0+$/.test(s)) return 'round'
+  if (n >= 1985 && n <= 2028) return 'a year'
+  if (len >= 4 && s === [...s].reverse().join('')) return 'mirror'
+  if (len >= 4 && run()) return 'in order'
+  if (len >= 4 && len % 2 === 0 && s.slice(0, len / 2) === s.slice(len / 2)) return 'repeat'
+  if (/(\d)\1{3,}/.test(s)) return '4 in a row'
+  if (len >= 5 && /^[1-9]0{3,}\d?$|^\d0{4,}$/.test(s)) return 'almost round'
+  for (const p of ['5201314', '1314', '1688', '168', '518', '520'])      // Chinese lucky: 8 wealth, 6 smooth, 9 long life
+    if (s === p || (len > p.length && (s.startsWith(p) ? !s.slice(p.length).includes('4') : s.endsWith(p) && !s.slice(0, -p.length).includes('4')))) return 'lucky'
+  if (s.includes('4')) return null
+  if (len >= 2 && /^[689]+$/.test(s)) return 'lucky'
+  if (len >= 3 && /^[15][689]+$/.test(s)) return 'lucky'
+  if ((s.match(/8/g) || []).length >= 3) return 'lucky'
+  return null
+}
+
+// "Title #num" on one line; a nice number is drawn inverted in a pill with a star, its reason in small letters after it
+function titleLine(ctx: CanvasRenderingContext2D, d: Deal, x: number, y: number, max: number, font: string, numFont: string) {
+  const nice = niceNumber(d.num)
+  ctx.textBaseline = 'alphabetic'
+  ctx.font = numFont
+  const num = nice ? `★ #${d.num}` : ` #${d.num}`
+  const numW = ctx.measureText(num).width + (nice ? 14 : 0)
+  ctx.font = font
+  const name = fit(ctx, d.title, Math.max(40, max - numW - (nice ? 10 : 0)))
+  ctx.fillText(name, x, y)
+  let nx = x + ctx.measureText(name).width + (nice ? 8 : 0)
+  ctx.font = numFont
+  if (!nice) { ctx.fillText(num, nx, y); return }
+  const m = ctx.measureText(num), h = Math.round((m.actualBoundingBoxAscent || 12) + 8)
+  rrect(ctx, nx, y - h + 4, numW, h, h / 2); ctx.fillStyle = '#fff'; ctx.fill()
+  ctx.fillStyle = '#000'; ctx.fillText(num, nx + 7, y)
+  nx += numW + 6
+  ctx.font = `600 11px ${FONT}`; ctx.fillStyle = C.dim
+  if (nx + ctx.measureText(nice).width <= x + max) ctx.fillText(nice, nx, y - 1)
+}
+
 function fit(ctx: CanvasRenderingContext2D, text: string, max: number) {
   if (ctx.measureText(text).width <= max) return text
   while (text.length > 1 && ctx.measureText(text + '…').width > max) text = text.slice(0, -1)
@@ -311,11 +354,8 @@ function drawDeal(ctx: CanvasRenderingContext2D, d: Deal, pic: HTMLCanvasElement
   pill(ctx, cx + cw - 7, cy + 7, `↗ ${xs(d.x)}×`, `800 12px ${FONT}`, '#000', '#fff', true)
   ctx.textBaseline = 'alphabetic'
   let y = cy + mh + 22
-  ctx.font = `700 15px ${FONT}`; ctx.fillStyle = C.text
-  const name = fit(ctx, d.title, cw - 90)
-  ctx.fillText(name, cx + 10, y)
-  const nw = ctx.measureText(name).width
-  ctx.font = `500 14px ${FONT}`; ctx.fillStyle = C.dim; ctx.fillText(` #${d.num}`, cx + 10 + nw, y)
+  ctx.fillStyle = C.text
+  titleLine(ctx, d, cx + 10, y, cw - 20, `700 15px ${FONT}`, `600 14px ${FONT}`)
   y += 18
   ctx.font = `500 12px ${FONT}`; ctx.fillStyle = C.dim
   ctx.fillText(fit(ctx, `${d.model} · ${d.backdrop}`, cw - 20), cx + 10, y)
@@ -506,8 +546,8 @@ function drawGlance(ctx: CanvasRenderingContext2D, d: Deal, pic: HTMLCanvasEleme
     ctx.font = `600 13px ${FONT}`; ctx.fillStyle = C.dim
     ctx.fillText(`resell estimate · ↗ ${xs(d.x)}× vs top sale`, x, 124)
   }
-  ctx.font = `800 23px ${FONT}`; ctx.fillStyle = C.text
-  ctx.fillText(fit(ctx, `${d.title} #${d.num}`, W - x - 12), x, 160)
+  ctx.fillStyle = C.text
+  titleLine(ctx, d, x, 160, W - x - 12, `800 23px ${FONT}`, `800 21px ${FONT}`)
   ctx.font = `500 15px ${FONT}`; ctx.fillStyle = C.dim
   ctx.fillText(fit(ctx, `${d.model} · ${d.backdrop}`, W - x - 12), x, 184)
   ctx.font = `700 16px ${FONT}`; ctx.fillStyle = C.text
