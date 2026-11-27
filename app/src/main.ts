@@ -14,6 +14,7 @@ import {
   OsEventTypeList,
 } from '@evenrealities/even_hub_sdk'
 import lottie from 'lottie-web/build/player/lottie_light_canvas'
+import { isDemo, webBridge } from './webbridge'
 
 type Deal = {
   id: string; title: string; num: number; model: string; backdrop: string; pattern?: string
@@ -34,7 +35,8 @@ const MARKET: Record<string, string> = {
   telegram: 'Telegram', onchain: 'On-chain', mrkt: 'MRKT', portals: 'Portals', tonnel: 'Tonnel', getgems: 'GetGems',
 }
 
-const bridge = await waitForEvenAppBridge()
+// outside the Even Hub app (?demo or a plain browser) the lens is drawn on the page — browser demo for the jury
+const bridge = (isDemo() ? webBridge() : await waitForEvenAppBridge()) as unknown as Awaited<ReturnType<typeof waitForEvenAppBridge>>
 
 // ---------- screen layout ----------
 // The lens is a 576×288 monochrome green display. To look like the TeleGift app, the whole screen above the hint line
