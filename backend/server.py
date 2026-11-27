@@ -546,7 +546,9 @@ def signals(limit=20, minutes=60):
             "x": round(h.get("upside") or best or 0, 2), "floor": floor, "cheapest": cheapest, "typical": h.get("typical"),
             "max": h.get("max_stars"), "sales": h.get("sales"),
             # where the top sale (the "×" is measured to) happened: Telegram Market unless the estimate says on-chain
-            "max_mk": h.get("max_venue") or ("On-chain" if h.get("max_market") == "onchain" else "Telegram"), "market": d.get("market") or "telegram",
+            "max_mk": h.get("max_venue") or ("On-chain" if h.get("max_market") == "onchain" else "Telegram"),
+            # the competition on Telegram Market: the cheapest other same lot (★) and how many there are — 0: nobody else sells it
+            "next": res.get("floor"), "same": res.get("same"), "market": d.get("market") or "telegram",
             "url": d.get("url") or (f"https://t.me/nft/{d['slug']}" if d.get("slug") else None),
             "seen_s": int(time.time() - last),
             "resell": resell(d, h, res, usd_rate),

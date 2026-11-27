@@ -23,6 +23,7 @@ type Deal = {
   fair?: number | null; stars?: number | null; rs_pct?: number | null; rs_good?: boolean
   mr?: string | null; br?: string | null; pr?: string | null
   max_mk?: string                        // the marketplace of the top sale the "×" is measured to
+  next?: number | null; same?: number | null   // cheapest other same lot (★) and how many others are on sale
   sold?: boolean
 }
 
@@ -965,7 +966,7 @@ function drawDetail(ctx: CanvasRenderingContext2D, d: Deal, det: Detail | 'loadi
 
 // Glance type (owner 27.11, variants 2 + 4): three brightness levels — only the ×, the name and the price are bright;
 // service lines are small caps with letter spacing, like an instrument panel. The lens brightens grays, hence dark values.
-const G_MID = '#5c5c5c', G_DIM = '#262626'
+const G_MID = '#5c5c5c'
 function capsText(ctx: CanvasRenderingContext2D, text: string, x: number, y: number, max: number, font: string, color: string) {
   ctx.font = font; ctx.fillStyle = color
   const c = ctx as CanvasRenderingContext2D & { letterSpacing?: string }
@@ -1020,12 +1021,19 @@ function drawGlance(ctx: CanvasRenderingContext2D, d: Deal, pic: HTMLCanvasEleme
   if (rs) parts.push(`sell ~${num(rs.sell)} ★ → +${Math.round((rs.profit_usd / Math.max(0.01, rs.cost_usd)) * 100)}%`)
   if (parts.length) capsText(ctx, parts.join('  ·  '), x + xw, 210, W - x - xw - 12, `600 12px ${FONT}`, G_MID)
   // one quiet line of signals: competition and how such resales usually end
+  // the competition, so the first screen already tells whether a resale has room (owner 27.11): the cheapest — what the next
+  // same lot costs and how much dearer; nobody else — say so; otherwise — from what price others sell. In dollars (★ × 0.015).
   const sig: string[] = []
-  if (d.cheapest) sig.push('cheapest on sale')
-  else if (d.floor) sig.push(`on sale from ${num(d.floor)} ★`)
+  const $r = (v: number) => `$${v >= 10 ? Math.round(v) : money(v)}`
+  if (d.same === 0) sig.push('no others on sale')
+  else if (d.cheapest && d.next) {
+    const nu = d.next * STAR_USD, pct = dollars ? Math.round((nu / dollars - 1) * 100) : null
+    sig.push(`cheapest · next ${$r(nu)}${pct != null && pct > 0 ? ` (+${pct}%)` : ''}`)
+  } else if (d.cheapest) sig.push('cheapest on sale')
+  else if (d.floor) sig.push(`on sale from ${$r(d.floor * STAR_USD)}`)
   if (d.rs_good && d.rs_pct) sig.push(`★ ${Math.round(d.rs_pct * 100)}% of resales in profit`)
   else if (d.sales) sig.push(`${num(d.sales)} sales`)
-  if (sig.length) capsText(ctx, sig.join('  ·  '), x, 242, W - x - 12, `600 11px ${FONT}`, G_DIM)
+  if (sig.length) capsText(ctx, sig.join('  ·  '), x, 242, W - x - 12, `600 11px ${FONT}`, G_MID)
   if (d.sold) {
     ctx.fillStyle = '#000'; ctx.fillRect(0, 36, W, H - 36)
     ctx.save(); ctx.translate(W / 2, 120); ctx.rotate(-0.12)
