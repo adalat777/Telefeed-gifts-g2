@@ -9,3 +9,5 @@ tunnel.txt
 cloudflared
 cloudflared.log
 backend/cache/
+backend/watches.json
+backend/watches.json.tmp

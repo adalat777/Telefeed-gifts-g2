@@ -7,6 +7,8 @@ Small stdlib-only HTTP server (no dependencies):
   POST /send {"token", "item"}         the bot sends this deal to the paired Telegram chat (link + "Open gift" button)
   GET  /model?c=<collection>&m=<model>  PNG of the gift model without background (cdn.changes.tg, cached on disk)
   GET  /gift?slug=<slug>             the full gift picture (backdrop + pattern symbols + model) from Fragment, cached
+  GET  /detail?c=&m=&b=               last 30 days: daily median sale price (Telegram Market) + median per marketplace
+  POST /watch {"token", "item"}        watch a deal: the bot writes if it gets cheaper or is sold
   GET  /health
 
 Env:
@@ -80,6 +82,22 @@ def save_pairs():
     os.replace(PAIRS + ".tmp", PAIRS)
 
 
+WATCHES = os.path.join(HERE, "watches.json")     # chat -> {gift id: {"stars", "ton", "title", "num", "at"}} (gitignored)
+_watches = {}
+_items = {}                                       # gift id -> last deal we sent (for the bot buttons)
+
+try:
+    _watches.update(json.load(open(WATCHES)))
+except (OSError, ValueError):
+    pass
+
+
+def save_watches():
+    with open(WATCHES + ".tmp", "w") as f:
+        json.dump(_watches, f)
+    os.replace(WATCHES + ".tmp", WATCHES)
+
+
 try:
     _pairs.update(json.load(open(PAIRS)))
 except (OSError, ValueError):
@@ -109,9 +127,12 @@ def bot_loop():
     offset = 0
     while True:
         try:
-            res = tg("getUpdates", {"offset": offset, "timeout": 30, "allowed_updates": ["message"]}, timeout=40)
+            res = tg("getUpdates", {"offset": offset, "timeout": 30, "allowed_updates": ["message", "callback_query"]}, timeout=40)
             for u in res.get("result", []):
                 offset = u["update_id"] + 1
+                if u.get("callback_query"):
+                    on_button(u["callback_query"])
+                    continue
                 m = u.get("message") or {}
                 chat = (m.get("chat") or {}).get("id")
                 text = (m.get("text") or "").strip()
@@ -221,6 +242,96 @@ def image_type(data):
     return "image/webp"
 
 
+def add_watch(chat, it):
+    gid = str(it.get("id") or "")
+    if not gid:
+        return False
+    with _lock:
+        _watches.setdefault(str(chat), {})[gid] = {"stars": it.get("price") if it.get("cur") == "STARS" else None,
+                                                   "ton": it.get("price") if it.get("cur") == "GRAM" else None,
+                                                   "title": it.get("title"), "num": it.get("num"), "url": it.get("url"),
+                                                   "at": time.time()}
+        save_watches()
+    return True
+
+
+def on_button(cb):
+    chat = ((cb.get("message") or {}).get("chat") or {}).get("id")
+    kind, _, gid = (cb.get("data") or "").partition(":")
+    it = _items.get(gid)
+    note = ""
+    try:
+        if not chat or not it:
+            note = "This deal is no longer in memory — tap it on the glasses again."
+        elif kind == "chart":
+            det = detail(it.get("title"), it.get("model"), it.get("backdrop"))
+            tg("sendMessage", {"chat_id": chat, "text": chart_text(it, det)}, 15)
+        elif kind == "watch":
+            add_watch(chat, it)
+            note = "👁 Watching — I'll write if it gets cheaper or is sold."
+        tg("answerCallbackQuery", {"callback_query_id": cb["id"], "text": note[:190]}, 15)
+    except Exception:
+        pass
+
+
+def watch_loop():
+    """Every minute: watched deals that were sold or got at least 3 % cheaper → a message to the chat that watches them."""
+    while True:
+        time.sleep(60)
+        check_watches()
+
+
+def check_watches():
+    if True:
+        try:
+            with _lock:
+                todo = [(chat, gid, dict(w)) for chat, ws in _watches.items() for gid, w in ws.items()]
+            if not todo:
+                return
+            db = sqlite3.connect(f"file:{DB}?mode=ro", uri=True, timeout=5)
+            try:
+                rows = {k: (st, data) for k, st, data in db.execute(
+                    f"SELECT key, status, data FROM profitable WHERE key IN ({','.join('?' * len(todo))})", [g for _, g, _ in todo])}
+            finally:
+                db.close()
+            for chat, gid, w in todo:
+                st, data = rows.get(gid, (None, None))
+                name = f"{w.get('title')} #{w.get('num')}"
+                msg = None
+                if st in ("sold", "gone", "off"):
+                    msg = f"⚡ {name} is no longer on sale — someone bought it or it was taken off."
+                    drop = True
+                else:
+                    drop = False
+                    try:
+                        d = json.loads(data) if data else {}
+                    except ValueError:
+                        d = {}
+                    now_st, now_ton = d.get("stars"), d.get("ton")
+                    if w.get("stars") and now_st and now_st <= w["stars"] * 0.97:
+                        msg = f"📉 {name} got cheaper: {w['stars']} ⭐ → {now_st} ⭐"
+                    elif w.get("ton") and now_ton and now_ton <= w["ton"] * 0.97:
+                        msg = f"📉 {name} got cheaper: {w['ton']} GRAM → {round(now_ton, 2)} GRAM"
+                if not msg:
+                    continue
+                params = {"chat_id": chat, "text": msg + "\n\nData, not financial advice."}
+                if not drop and w.get("url") and SAFE_URL.match(w["url"]):
+                    params["reply_markup"] = {"inline_keyboard": [[{"text": "🎁 Open gift", "url": w["url"]}]]}
+                tg("sendMessage", params, 15)
+                with _lock:
+                    ws = _watches.get(chat, {})
+                    if drop:
+                        ws.pop(gid, None)
+                    elif gid in ws:                       # next alert only after a further drop
+                        if w.get("stars"):
+                            ws[gid]["stars"] = now_st
+                        if w.get("ton"):
+                            ws[gid]["ton"] = now_ton
+                    save_watches()
+        except Exception:
+            pass
+
+
 # ---------- signals (read-only) ----------
 def signals(limit=20, minutes=60):
     key = (limit, minutes)
@@ -295,6 +406,103 @@ def resell(d, h, res, usd_rate):
             "profit_usd": round(get - cost, 2)}
 
 
+VENUES = [("telegram", "Telegram"), ("mrkt", "MRKT"), ("portals", "Portals"), ("tonnel", "Tonnel"),
+          ("getgems", "GetGems"), ("onchain", "On-chain")]
+_detail_cache = {}
+
+
+def _median(xs):
+    xs = sorted(xs)
+    return xs[len(xs) // 2] if xs else None
+
+
+def _clean(xs):
+    """Drop sales 10× above the lower median (fake / outlier deals), as TeleFeed does."""
+    xs = [x for x in xs if x and x > 0]
+    if len(xs) < 3:
+        return xs
+    lo = sorted(xs)[(len(xs) - 1) // 2]
+    return [x for x in xs if x <= lo * 10]
+
+
+def detail(col, model, backdrop, days=30):
+    """Read-only from the TeleFeed database: price chart (Telegram Market, daily median in $) and median price per venue."""
+    key = (col, model, backdrop, days)
+    hit = _detail_cache.get(key)
+    if hit and time.time() - hit[0] < 120:
+        return hit[1]
+    since_ts = time.time() - days * 86400
+    since = time.strftime("%Y-%m-%d", time.gmtime(since_ts))
+    db = sqlite3.connect(f"file:{DB}?mode=ro", uri=True, timeout=5)
+    try:
+        r = db.execute("SELECT usd FROM ton_usd ORDER BY day DESC LIMIT 1").fetchone()
+        rate = float(r[0]) if r else None
+        tg = db.execute("SELECT substr(sold_at,1,10), normalized FROM sales INDEXED BY sales_combo "
+                        "WHERE collection=? AND model=? AND backdrop=? AND sold_at >= ?", (col, model, backdrop, since)).fetchall()
+        per = {"telegram": [t for _, t in tg]}
+        for m in ("mrkt", "portals", "tonnel", "getgems"):
+            try:
+                per[m] = [t for (t,) in db.execute(
+                    "SELECT ton FROM msales INDEXED BY msales_combo WHERE market=? AND collection=? AND model=? AND backdrop=? "
+                    "AND sold_at >= ?", (m, col, model, backdrop, since))]
+            except sqlite3.Error:
+                per[m] = []
+        try:
+            per["portals"] += [t for (t,) in db.execute(
+                "SELECT ton FROM portals_sales WHERE title=? AND model=? AND backdrop=? AND sold_at >= ?",
+                (col, model, backdrop, since_ts))]
+        except sqlite3.Error:
+            pass
+        try:
+            per["onchain"] = [t for (t,) in db.execute(
+                "SELECT ton FROM onchain_sales WHERE collection=? AND model=? AND backdrop=? AND ts >= ? AND src != dst "
+                "AND market NOT IN ('Telegram', 'Getgems')", (col, model, backdrop, int(since_ts)))]
+        except sqlite3.Error:
+            per["onchain"] = []
+    finally:
+        db.close()
+    usd = (lambda ton: round(ton * rate, 2)) if rate else (lambda ton: None)
+    ok_tg = set(_clean([t for _, t in tg]))           # outliers judged over the whole month, not one day
+    days_map = {}
+    for day, t in tg:
+        if t in ok_tg:
+            days_map.setdefault(day, []).append(t)
+    chart = []
+    for i in range(days):
+        day = time.strftime("%Y-%m-%d", time.gmtime(since_ts + (i + 1) * 86400))
+        xs = days_map.get(day, [])
+        m = _median(xs)
+        chart.append({"day": day, "usd": usd(m) if m else None, "n": len(xs)})
+    venues = []
+    for k, name in VENUES:
+        xs = _clean(per.get(k) or [])
+        m = _median(xs)
+        venues.append({"market": k, "name": name, "n": len(xs), "usd": usd(m) if m else None})
+    out = {"chart": chart, "venues": venues, "days": days}
+    _detail_cache[key] = (time.time(), out)
+    return out
+
+
+SPARK = "▁▂▃▄▅▆▇█"
+
+
+def chart_text(it, det):
+    pts = [c["usd"] for c in det["chart"] if c["usd"]]
+    lines = [f"📈 {it.get('title')} · {it.get('model')} · {it.get('backdrop')} — last {det['days']} days"]
+    if pts:
+        lo, hi = min(pts), max(pts)
+        line = "".join(SPARK[0] if c["usd"] is None else SPARK[int((c["usd"] - lo) / ((hi - lo) or 1) * 7)] for c in det["chart"])
+        lines += [line, f"low ${lo} · high ${hi} · {sum(c['n'] for c in det['chart'])} sales on Telegram Market"]
+    else:
+        lines.append("No Telegram Market sales of this model + backdrop in the last 30 days.")
+    vs = [v for v in det["venues"] if v["usd"]]
+    if vs:
+        lines += ["", "Median sale price by marketplace:"]
+        lines += [f"• {v['name']}: ${v['usd']} ({v['n']} sales)" for v in vs]
+    lines += ["", "Data, not financial advice."]
+    return "\n".join(lines)
+
+
 MARKET = {"telegram": "Telegram Market", "onchain": "on-chain (Market App)", "mrkt": "MRKT", "portals": "Portals",
           "tonnel": "Tonnel", "getgems": "GetGems"}
 SAFE_URL = re.compile(r"^https://(t\.me|marketapp\.org)/")
@@ -343,6 +551,15 @@ class H(BaseHTTPRequestHandler):
                 minutes = max(1, min(1440, int(q.get("minutes", ["60"])[0])))
                 return self._send(200, signals(limit, minutes))
             except (ValueError, sqlite3.Error) as e:
+                return self._send(503, {"error": type(e).__name__})
+        if u.path == "/detail":
+            q = urllib.parse.parse_qs(u.query)
+            c, m, b = ((q.get(k) or [""])[0][:64] for k in ("c", "m", "b"))
+            if not (c and m and b):
+                return self._send(400, {"error": "need c, m, b"})
+            try:
+                return self._send(200, detail(c, m, b))
+            except sqlite3.Error as e:
                 return self._send(503, {"error": type(e).__name__})
         if u.path == "/gift":
             slug = (urllib.parse.parse_qs(u.query).get("slug") or [""])[0][:80]
@@ -396,6 +613,19 @@ class H(BaseHTTPRequestHandler):
                 code = f"{random.SystemRandom().randrange(10**6):06d}"
                 _pending[code] = {"at": time.time(), "token": None}
             return self._send(200, {"code": code, "bot": bot_name()})
+        if u.path == "/watch":
+            tok, it = body.get("token"), body.get("item") or {}
+            chat = _pairs.get(tok) if isinstance(tok, str) else None
+            if not chat:
+                return self._send(403, {"error": "not paired"})
+            add_watch(chat, it)
+            _items[str(it.get("id") or "")[:40]] = it
+            try:
+                tg("sendMessage", {"chat_id": chat, "text": f"👁 Watching {it.get('title')} #{it.get('num')} — "
+                                   "I'll write if it gets cheaper or is sold."}, 15)
+            except Exception:
+                pass
+            return self._send(200, {"ok": True})
         if u.path == "/send":
             tok, it = body.get("token"), body.get("item") or {}
             chat = _pairs.get(tok) if isinstance(tok, str) else None
@@ -405,12 +635,32 @@ class H(BaseHTTPRequestHandler):
                 return self._send(429, {"error": "slow down"})
             _last_send[tok] = time.time()
             url = it.get("url") if isinstance(it.get("url"), str) and SAFE_URL.match(it["url"]) else None
-            params = {"chat_id": chat, "text": deal_text(it), "disable_web_page_preview": "false"}
-            if url:
-                params["reply_markup"] = {"inline_keyboard": [[{"text": "🎁 Open gift", "url": url}]]}
+            gid = str(it.get("id") or "")[:40]
+            _items[gid] = it
+            if len(_items) > 500:
+                _items.pop(next(iter(_items)))
+            rows = [[{"text": "🎁 Open gift", "url": url}]] if url else []
+            if gid:
+                rows.append([{"text": "📈 Price chart", "callback_data": f"chart:{gid}"},
+                             {"text": "👁 Watch", "callback_data": f"watch:{gid}"}])
+            markup = {"inline_keyboard": rows} if rows else None
+            ok = False
+            slug = it.get("id") if isinstance(it.get("id"), str) and re.fullmatch(r"[A-Za-z0-9]+-\d{1,9}", it["id"]) else None
             try:
-                r = tg("sendMessage", params, 15)
-                return self._send(200, {"ok": bool(r.get("ok"))})
+                if slug:                                  # the gift picture with the deal as caption
+                    p = {"chat_id": chat, "photo": FRAGMENT_GIFT.format(slug.lower()), "caption": deal_text(it)[:1000]}
+                    if markup:
+                        p["reply_markup"] = markup
+                    try:
+                        ok = bool(tg("sendPhoto", p, 20).get("ok"))
+                    except Exception:
+                        ok = False
+                if not ok:
+                    params = {"chat_id": chat, "text": deal_text(it), "disable_web_page_preview": "false"}
+                    if markup:
+                        params["reply_markup"] = markup
+                    ok = bool(tg("sendMessage", params, 15).get("ok"))
+                return self._send(200, {"ok": ok})
             except Exception as e:
                 return self._send(502, {"error": type(e).__name__})
         self._send(404, {"error": "not found"})
@@ -423,5 +673,6 @@ if __name__ == "__main__":
     port = int(os.environ.get("PORT", "8090"))
     if BOT:
         threading.Thread(target=bot_loop, daemon=True).start()
+        threading.Thread(target=watch_loop, daemon=True).start()
     print(f"TeleGift Glance backend on http://127.0.0.1:{port} · bot: {'@' + bot_name() if BOT else 'not configured'}")
     ThreadingHTTPServer(("127.0.0.1", port), H).serve_forever()
