@@ -8,6 +8,7 @@ Small stdlib-only HTTP server (no dependencies):
   POST /send {"token", "item"}         the bot sends this deal to the paired Telegram chat (link + "Open gift" button)
   GET  /full?c=&m=&b=&slug=&stars=&mr=&br=  the app's 'Full gift info': floors, supply, sales history, lots on sale
   GET  /model-anim?slug=<gift slug>      model animation (Fragment lottie, only the 'Gift' layer, cached on disk)
+                                          &layer=pattern — only the symbols ('Pattern'), same canvas, for the backdrop
   GET  /model?c=<collection>&m=<model>  PNG of the gift model without background (cdn.changes.tg, cached on disk)
   GET  /gift?slug=<slug>             the full gift picture (backdrop + pattern symbols + model) from Fragment, cached
   GET  /detail?c=&m=&b=               last 30 days: daily median sale price (Telegram Market) + median per marketplace
@@ -307,11 +308,12 @@ FRAGMENT_LOTTIE = "https://nft.fragment.com/gift/{}.lottie.json"
 _anim_lock = threading.Lock()
 
 
-def model_anim(slug):
-    """The gift's animation from Fragment with only the model layer ("Gift") — JSON bytes, cached on disk; None if absent."""
-    if not re.fullmatch(r"[A-Za-z0-9]+-\d{1,9}", slug or ""):
+def model_anim(slug, layer="gift"):
+    """The gift's animation from Fragment with only one layer — "Gift" (the model) or "Pattern" (the symbols around it,
+    on the same 512×512 canvas, so they sit exactly as on the official card) — JSON bytes, cached on disk; None if absent."""
+    if not re.fullmatch(r"[A-Za-z0-9]+-\d{1,9}", slug or "") or layer not in ("gift", "pattern"):
         return None
-    path = os.path.join(IMG_CACHE, "anim_" + slug.lower() + ".json")
+    path = os.path.join(IMG_CACHE, ("anim_" if layer == "gift" else "pat2_") + slug.lower() + ".json")
     miss = path[:-5] + ".none"
     if os.path.exists(path):
         return open(path, "rb").read()
@@ -335,12 +337,14 @@ def model_anim(slug):
             return None
         try:
             d = json.loads(raw)
-            keep = [x for x in d.get("layers") or [] if (x.get("nm") or "").strip().lower() == "gift"]
+            keep = [x for x in d.get("layers") or [] if (x.get("nm") or "").strip().lower() == layer]
         except (ValueError, AttributeError):
             keep = []
         if not keep:
             open(miss, "w").close()
             return None
+        for x in keep:            # the 'Pattern' layer is a matte for 'Color Icon' and is not drawn itself — draw it
+            x.pop("td", None)
         d["layers"] = keep
         data = json.dumps(d, separators=(",", ":")).encode()
         with open(path, "wb") as f:
@@ -975,7 +979,7 @@ class H(BaseHTTPRequestHandler):
             return
         if u.path == "/model-anim":
             q = urllib.parse.parse_qs(u.query)
-            data = model_anim((q.get("slug") or [""])[0][:80])
+            data = model_anim((q.get("slug") or [""])[0][:80], (q.get("layer") or ["gift"])[0][:10])
             if not data:
                 return self._send(404, {"error": "no animation"})
             self.send_response(200)

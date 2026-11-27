@@ -148,7 +148,55 @@ function lensify(bmp: CanvasImageSource & { width: number; height: number }, siz
 // Only gifts that are on Fragment have it (on-chain collections); the others keep the still picture.
 // Played at the animation's own speed: each frame goes out as soon as the lens took the previous one; if the lens is slower,
 // frames are skipped by the clock (never slowed down or jerked), so the motion stays even.
+const STILL_K = 0.7                              // the gift 30 % smaller in its square (owner 27.11)
+async function stillPicture(title: string, model: string): Promise<HTMLCanvasElement | null> {
+  const p = await modelPicture(title, model, Math.round(GLANCE_PX * STILL_K))
+  if (!p) return null
+  const c = document.createElement('canvas'); c.width = c.height = GLANCE_PX
+  c.getContext('2d')!.drawImage(p, Math.round((GLANCE_PX - p.width) / 2), Math.round((GLANCE_PX - p.height) / 2))
+  return c
+}
 const ANIM_FRAMES = 90                           // up to 30 frames a second of a 3 s animation
+// The gift's symbols behind the model (owner 27.11): the 'Pattern' layer of the same Fragment animation, on the same canvas
+// and cut with the same crop as the model — so size and places are 1 in 1 as on the official card; drawn faintly.
+const PATTERN_GRAY = 30                          // the lens lifts darks: 40 shows as a quiet gray
+const PATTERN_VIEW = 1                           // the whole card: model 30 % smaller than the tight crop, all symbols as on the official card (owner 27.11)
+async function patternLayer(slug: string, w: number, h: number): Promise<HTMLCanvasElement | null> {
+  try {
+    const r = await fetch(`${API}/model-anim?slug=${encodeURIComponent(slug)}&layer=pattern&v=2`)
+    if (!r.ok) return null
+    const data = await r.json()
+    const box = document.createElement('div')
+    box.style.cssText = 'position:fixed;left:-9999px;top:0;width:256px;height:256px;overflow:hidden'   // same as the model's box
+    document.body.appendChild(box)
+    const a = lottie.loadAnimation({ container: box, renderer: 'canvas', loop: false, autoplay: false, animationData: data,
+      rendererSettings: { clearCanvas: true } })
+    await new Promise<void>((res) => { if (a.isLoaded) res(); else { a.addEventListener('DOMLoaded', () => res()); setTimeout(res, 1500) } })
+    const cv = box.querySelector('canvas')
+    let out: HTMLCanvasElement | null = null
+    if (cv) {                                      // drawn at the model canvas' size, whatever the screen density
+      a.goToAndStop(0, true)
+      out = document.createElement('canvas'); out.width = w; out.height = h
+      out.getContext('2d')!.drawImage(cv, 0, 0, w, h)
+    }
+    a.destroy(); box.remove()
+    return out
+  } catch { return null }
+}
+// the cropped pattern → a faint one-gray silhouette of the symbols, the size of a frame
+function faintPattern(src: HTMLCanvasElement, sx: number, sy: number, side: number, size: number) {
+  const c = document.createElement('canvas'); c.width = c.height = size
+  const ctx = c.getContext('2d')!
+  ctx.imageSmoothingQuality = 'high'
+  ctx.drawImage(src, sx, sy, side, side, 0, 0, size, size)
+  const img = ctx.getImageData(0, 0, size, size), d = img.data
+  for (let i = 0; i < d.length; i += 4) {
+    const a = d[i + 3] / 255
+    d[i] = d[i + 1] = d[i + 2] = PATTERN_GRAY; d[i + 3] = a > 0.25 ? 255 : Math.round(a * 4 * 255)
+  }
+  ctx.putImageData(img, 0, 0)
+  return c
+}
 type Frames = HTMLCanvasElement[] & { dur?: number }
 const animCache = new Map<string, Promise<Frames | null>>()
 const restFrame = new Map<string, HTMLCanvasElement>()   // after playing, the deal keeps the animation's first frame (no jump to the still picture)
@@ -157,6 +205,7 @@ function modelFrames(slug: string): Promise<Frames | null> {
   if (!animCache.has(slug)) {
     animCache.set(slug, (async () => {
       try {
+        const patP = patternLayer(slug, 512, 512)                  // in parallel with the animation
         const r = await fetch(`${API}/model-anim?slug=${encodeURIComponent(slug)}`)
         if (!r.ok) return null
         const data = await r.json()
@@ -175,25 +224,42 @@ function modelFrames(slug: string): Promise<Frames | null> {
         // the animation has wide empty margins: find the box the model ever occupies (every 6th frame) and crop all frames
         // to that same box — the model is as big as on the still picture and does not jump between frames
         const cx = cv.getContext('2d')!
+        const patRaw = await patP
         let x0 = cv.width, y0 = cv.height, x1 = 0, y1 = 0
-        for (let i = 0; i < count; i += 6) {
+        for (let i = 0; i < (patRaw ? 0 : count); i += 6) {     // with symbols the whole card is shown: no need to scan
           a.goToAndStop(Math.round((i * n) / count), true)
           const px = cx.getImageData(0, 0, cv.width, cv.height).data
           for (let y = 0; y < cv.height; y += 2) for (let x = 0; x < cv.width; x += 2)
             if (px[(y * cv.width + x) * 4 + 3] > 24) { if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y }
         }
         if (x1 <= x0) { x0 = 0; y0 = 0; x1 = cv.width - 1; y1 = cv.height - 1 }
-        const side = Math.min(cv.width, Math.max(x1 - x0, y1 - y0) + 8)
-        const sx = Math.max(0, Math.min(cv.width - side, Math.round((x0 + x1 - side) / 2)))
-        const sy = Math.max(0, Math.min(cv.height - side, Math.round((y0 + y1 - side) / 2)))
+        // owner 27.11: the gift 30 % smaller than the tight crop (the same as the still picture, see stillPicture)
+        let side = Math.min(cv.width, Math.round((Math.max(x1 - x0, y1 - y0) + 8) / STILL_K))
+        let sx = Math.max(0, Math.min(cv.width - side, Math.round((x0 + x1 - side) / 2)))
+        let sy = Math.max(0, Math.min(cv.height - side, Math.round((y0 + y1 - side) / 2)))
+        let patSrc: HTMLCanvasElement | null = null
+        if (patRaw) { patSrc = document.createElement('canvas'); patSrc.width = cv.width; patSrc.height = cv.height; patSrc.getContext('2d')!.drawImage(patRaw, 0, 0, cv.width, cv.height) }
+        if (patSrc) {                // with the symbols: the card's own framing around its centre, so the inner ring fits
+          side = Math.min(cv.width, Math.max(side, Math.round(PATTERN_VIEW * cv.width)))
+          sx = Math.round((cv.width - side) / 2); sy = Math.round((cv.height - side) / 2)
+        }
         const crop = document.createElement('canvas'); crop.width = crop.height = side
         const cc = crop.getContext('2d')!
+        const pat = patSrc ? faintPattern(patSrc, sx, sy, side, GLANCE_PX) : null
         for (let i = 0; i < count; i++) {
           a.goToAndStop(Math.round((i * n) / count), true)
           cc.clearRect(0, 0, side, side); cc.drawImage(cv, sx, sy, side, side, 0, 0, side, side)
           const f = lensify(crop, GLANCE_PX, range)
           range = range || f.range
-          out.push(f.c)
+          if (pat) {                                       // symbols first, the model over them
+            const m = document.createElement('canvas'); m.width = m.height = GLANCE_PX
+            const mc = m.getContext('2d')!; mc.drawImage(pat, 0, 0); mc.drawImage(f.c, 0, 0)
+            out.push(m)
+          } else out.push(f.c)
+          if (i === 0 && !restFrame.has(slug)) {           // the first frame replaces the still picture right away
+            restFrame.set(slug, out[0])
+            if (deals[idx]?.id === slug && !animId) paint()
+          }
           await new Promise((res) => setTimeout(res, 0))       // let the lens keep drawing meanwhile
         }
         a.destroy(); box.remove()
@@ -983,6 +1049,9 @@ async function show(render: () => Promise<HTMLCanvasElement>) {
     while (wanted) {
       const r = wanted; wanted = null
       const full = await r()
+      // encode all changed tiles first, then send them one right after another — the halves of the gift (top and bottom
+      // tiles) change together, without a visible tear between them
+      const ready: { t: typeof TILES[number]; url: string; bytes: number[] }[] = []
       for (const t of TILES) {
         const c = document.createElement('canvas'); c.width = t.w; c.height = t.h
         const ctx = c.getContext('2d')!
@@ -991,7 +1060,9 @@ async function show(render: () => Promise<HTMLCanvasElement>) {
         const url = c.toDataURL('image/png')
         if (sentTile.get(t.id) === url) continue
         const blob: Blob = await new Promise((res) => c.toBlob((b) => res(b!), 'image/png'))
-        const bytes = Array.from(new Uint8Array(await blob.arrayBuffer()))
+        ready.push({ t, url, bytes: Array.from(new Uint8Array(await blob.arrayBuffer())) })
+      }
+      for (const { t, url, bytes } of ready) {
         await bridge.updateImageRawData(new ImageRawDataUpdate({ containerID: t.id, containerName: t.name, imageData: bytes }))
         sentTile.set(t.id, url)
       }
@@ -1079,7 +1150,7 @@ function paint() {
     show(async () => {
       const { c, ctx } = blank()
       const frames = animId === d.id && animStep >= 0 ? await modelFrames(d.id) : null
-      drawGlance(ctx, d, frames ? frames[animStep] : restFrame.get(d.id) || await modelPicture(d.title, d.model, GLANCE_PX), pos)
+      drawGlance(ctx, d, frames ? frames[animStep] : restFrame.get(d.id) || await stillPicture(d.title, d.model), pos)
       return c
     })
     if (!d.sold) playModel(d)
@@ -1094,7 +1165,7 @@ function paint() {
       const { c, ctx } = blank()
       if (page === 0) {
         const frames = animId === d.id && animStep >= 0 ? await modelFrames(d.id) : null
-        drawInfo(ctx, d, f?.v, frames ? frames[animStep] : restFrame.get(d.id) || await modelPicture(d.title, d.model, GLANCE_PX))
+        drawInfo(ctx, d, f?.v, frames ? frames[animStep] : restFrame.get(d.id) || await stillPicture(d.title, d.model))
       } else if (page === 1) drawSales(ctx, d, f?.v)
       else drawOnSale(ctx, d, f?.v)
       if (endMenu !== null) drawEndMenu(ctx)
