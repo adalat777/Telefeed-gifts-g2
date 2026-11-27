@@ -5,7 +5,8 @@
 #              backend/ changed     → backend restarts
 #              app/package.json     → npm install + app restarts
 #              app/ code            → the app reloads in the simulator by itself (Vite)
-#   + cloudflared public tunnel to the backend (if ./cloudflared is here) — the address is printed and saved to tunnel.txt
+#   The backend lives on the TeleFeed server (https://g2.77-216-135-201.sslip.io) — the app talks to it.
+#   LOCAL_BACKEND=1 ./dev.sh — run the backend on this Mac instead (+ cloudflared tunnel, if ./cloudflared is here).
 # Before starting, it stops anything left over from earlier runs. Ctrl+C stops everything.
 cd "$(dirname "$0")" || exit 1
 ROOT=$(pwd)
@@ -13,12 +14,15 @@ PY="${PYTHON:-$HOME/TeleFeed/.venv/bin/python}"
 [ -x "$PY" ] || PY=python3
 BRANCH=$(git rev-parse --abbrev-ref HEAD)
 BACK="" APP="" SIM="" CF=""
+API="${G2_API:-https://g2.77-216-135-201.sslip.io}"
+[ "${LOCAL_BACKEND:-}" = 1 ] && API=http://localhost:8090
 
 log() { echo "$(date +%H:%M:%S) $*"; }
-start_back() { (cd "$ROOT/backend" && exec "$PY" server.py) & BACK=$!; }
-start_app()  { (cd "$ROOT/app" && exec npx vite --clearScreen false) & APP=$!; }
+start_back() { [ "${LOCAL_BACKEND:-}" = 1 ] || return; (cd "$ROOT/backend" && exec "$PY" server.py) & BACK=$!; }
+start_app()  { (cd "$ROOT/app" && VITE_API="$API" exec npx vite --clearScreen false) & APP=$!; }
 start_sim()  { [ "${NO_SIM:-}" = 1 ] && return; (cd "$ROOT/app" && sleep 3 && exec npx evenhub-simulator http://localhost:5173 --automation-port 9898) & SIM=$!; }
 start_cf() {
+  [ "${LOCAL_BACKEND:-}" = 1 ] || return
   [ -x "$ROOT/cloudflared" ] || return
   "$ROOT/cloudflared" tunnel --url http://localhost:8090 > "$ROOT/cloudflared.log" 2>&1 & CF=$!
   for _ in $(seq 1 30); do
@@ -45,6 +49,7 @@ trap 'log "stopping"; stop_all; exit 0' INT TERM
 [ -d app/node_modules ] || (cd app && npm install --silent)
 cleanup_old
 start_back; start_app; start_sim; start_cf
+log "backend: $API"
 log "TeleGift Glance running · auto-update from GitHub every 3 s ($BRANCH)"
 
 while true; do
@@ -66,7 +71,7 @@ while true; do
       log "update failed (local changes?) — run: git status"
     fi
   fi
-  kill -0 "$BACK" 2>/dev/null || { log "backend stopped — starting again"; start_back; }
+  [ "${LOCAL_BACKEND:-}" = 1 ] && ! kill -0 "$BACK" 2>/dev/null && { log "backend stopped — starting again"; start_back; }
   kill -0 "$APP" 2>/dev/null || { log "app stopped — starting again"; start_app; }
   pgrep -f evenhub-simulator >/dev/null || { [ "${NO_SIM:-}" = 1 ] || { log "simulator closed — opening again"; start_sim; }; }
 done

@@ -11,7 +11,7 @@
       "desc": "Loads live underpriced Telegram Gift listings and sends a deal to your own Telegram chat via the TeleGift bot.",
       "whitelist": [
         "http://localhost:8090",
-        "https://student-competent-cigarettes-answered.trycloudflare.com"
+        "https://g2.77-216-135-201.sslip.io"
       ]
     }
   ],
