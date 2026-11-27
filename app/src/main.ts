@@ -28,91 +28,221 @@ const MARKET: Record<string, string> = {
 
 const bridge = await waitForEvenAppBridge()
 
-const head = new TextContainerProperty({
-  xPosition: 0, yPosition: 0, width: 576, height: 44, borderWidth: 0, borderColor: 5, paddingLength: 6,
-  containerID: 1, containerName: 'head', content: 'TELEGIFT GLANCE', isEventCapture: 0,
-})
-// picture of the gift model (no background) on the left, the deal text on the right
-const PIC = 140
-const pic = new ImageContainerProperty({
-  xPosition: 6, yPosition: 74, width: PIC, height: PIC, containerID: 4, containerName: 'pic',
-})
-const body = new TextContainerProperty({
-  xPosition: PIC + 12, yPosition: 44, width: 576 - PIC - 12, height: 200, borderWidth: 1, borderColor: 8, borderRadius: 6,
-  paddingLength: 10, containerID: 2, containerName: 'body', content: 'Loading deals...', isEventCapture: 1,
-})
+// ---------- screen layout ----------
+// The lens is a 576×288 monochrome green display. To look like the TeleGift app, the whole screen above the hint line
+// is drawn on a canvas — gift card with the model picture, market plaque, "↗ N×" badge, name, number, price —
+// and sent to the glasses as 4 grayscale image tiles (black = off). The hint line below is a text container that
+// also receives the touch events.
+const W = 576, H = 256, TW = 288
+const TILES = [
+  { id: 1, name: 't1', x: 0, y: 0, w: TW, h: 144 },
+  { id: 2, name: 't2', x: TW, y: 0, w: TW, h: 144 },
+  { id: 3, name: 't3', x: 0, y: 144, w: TW, h: H - 144 },
+  { id: 4, name: 't4', x: TW, y: 144, w: TW, h: H - 144 },
+]
+const tiles = TILES.map((t) => new ImageContainerProperty({
+  xPosition: t.x, yPosition: t.y, width: t.w, height: t.h, containerID: t.id, containerName: t.name,
+}))
 const foot = new TextContainerProperty({
-  xPosition: 0, yPosition: 248, width: 576, height: 40, borderWidth: 0, borderColor: 5, paddingLength: 6,
-  containerID: 3, containerName: 'foot', content: '', isEventCapture: 0,
+  xPosition: 0, yPosition: H, width: 576, height: 288 - H, borderWidth: 0, borderColor: 5, paddingLength: 4,
+  containerID: 5, containerName: 'foot', content: '', isEventCapture: 1,
 })
-await bridge.createStartUpPageContainer(
-  new CreateStartUpPageContainer({ containerTotalNum: 4, textObject: [head, body, foot], imageObject: [pic] }),
-)
-// After an app reload the glasses keep the old page — rebuild it so the picture container exists too.
-await bridge.rebuildPageContainer(
-  new RebuildPageContainer({ containerTotalNum: 4, textObject: [head, body, foot], imageObject: [pic] }),
-)
+const page = { containerTotalNum: 5, textObject: [foot], imageObject: tiles }
+await bridge.createStartUpPageContainer(new CreateStartUpPageContainer(page))
+// After an app reload the glasses keep the old page — rebuild it so every container exists.
+await bridge.rebuildPageContainer(new RebuildPageContainer(page))
 
 function put(id: number, name: string, content: string) {
   bridge.textContainerUpgrade(new TextContainerUpgrade({ containerID: id, containerName: name, content }))
 }
 
-// ---------- model picture ----------
-// The lens is monochrome green: we turn the model into a bright grayscale silhouette on black (black = transparent).
-const picCache = new Map<string, number[]>()
-let picShown = ''
-let picBusy = false
-let picWant = ''
+// ---------- model picture: shading + contours, in grayscale ----------
+const modelCache = new Map<string, HTMLCanvasElement | null>()
 
-async function picBytes(title: string, model: string): Promise<number[]> {
-  const key = `${title}|${model}`
-  const hit = picCache.get(key)
-  if (hit) return hit
-  const canvas = document.createElement('canvas')
-  canvas.width = PIC; canvas.height = PIC
-  const ctx = canvas.getContext('2d')!
-  ctx.fillStyle = '#000'; ctx.fillRect(0, 0, PIC, PIC)
+async function modelPicture(title: string, model: string, size: number): Promise<HTMLCanvasElement | null> {
+  const key = `${title}|${model}|${size}`
+  if (modelCache.has(key)) return modelCache.get(key)!
+  let out: HTMLCanvasElement | null = null
   try {
     const r = await fetch(`${API}/model?c=${encodeURIComponent(title)}&m=${encodeURIComponent(model)}`)
     if (r.ok) {
       const bmp = await createImageBitmap(await r.blob())
-      const k = Math.min(PIC / bmp.width, PIC / bmp.height) * 0.96
+      const c = document.createElement('canvas'); c.width = c.height = size
+      const ctx = c.getContext('2d')!
+      const k = Math.min(size / bmp.width, size / bmp.height)
       const w = bmp.width * k, h = bmp.height * k
-      ctx.drawImage(bmp, (PIC - w) / 2, (PIC - h) / 2, w, h)
-      const img = ctx.getImageData(0, 0, PIC, PIC)
-      const d = img.data
-      let max = 1
-      for (let i = 0; i < d.length; i += 4) {
-        const g = 0.3 * d[i] + 0.59 * d[i + 1] + 0.11 * d[i + 2]
-        d[i] = g; if (g > max) max = g
+      ctx.drawImage(bmp, (size - w) / 2, (size - h) / 2, w, h)
+      const img = ctx.getImageData(0, 0, size, size)
+      const d = img.data, N = size * size
+      const lum = new Float32Array(N), alpha = new Float32Array(N), vals: number[] = []
+      for (let p = 0; p < N; p++) {
+        const i = p * 4
+        alpha[p] = d[i + 3] / 255
+        lum[p] = 0.3 * d[i] + 0.59 * d[i + 1] + 0.11 * d[i + 2]
+        if (alpha[p] > 0.5) vals.push(lum[p])
       }
-      for (let i = 0; i < d.length; i += 4) {               // stretch contrast: brightest part = full brightness
-        const v = d[i] > 0 ? Math.min(255, 40 + Math.pow(d[i] / max, 0.8) * 215) : 0
-        d[i] = d[i + 1] = d[i + 2] = v; d[i + 3] = 255
+      vals.sort((a, b) => a - b)
+      const lo = vals.length ? vals[Math.floor(vals.length * 0.04)] : 0
+      const hi = vals.length ? vals[Math.floor(vals.length * 0.97)] : 255
+      const span = Math.max(20, hi - lo)
+      const tone = new Float32Array(N)
+      for (let p = 0; p < N; p++) tone[p] = Math.min(1, Math.max(0, (lum[p] - lo) / span)) * alpha[p]
+      for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) {
+        const p = y * size + x, i = p * 4
+        let e = 0
+        if (x > 0 && y > 0 && x < size - 1 && y < size - 1) {
+          const t = tone
+          const gx = t[p - size + 1] + 2 * t[p + 1] + t[p + size + 1] - t[p - size - 1] - 2 * t[p - 1] - t[p + size - 1]
+          const gy = t[p + size - 1] + 2 * t[p + size] + t[p + size + 1] - t[p - size - 1] - 2 * t[p - size] - t[p - size + 1]
+          e = Math.min(1, Math.hypot(gx, gy) * 0.9)
+        }
+        const t0 = tone[p] / Math.max(alpha[p], 0.01)
+        const v = (10 + 190 * t0 * t0) * (1 - 0.85 * e)          // the lens lifts darks, so keep the range low
+        d[i] = d[i + 1] = d[i + 2] = v; d[i + 3] = Math.round(alpha[p] * 255)
       }
       ctx.putImageData(img, 0, 0)
+      out = c
     }
-  } catch { /* no picture: stays black */ }
-  const blob: Blob = await new Promise((res) => canvas.toBlob((b) => res(b!), 'image/png'))
-  const bytes = Array.from(new Uint8Array(await blob.arrayBuffer()))
-  picCache.set(key, bytes)
-  if (picCache.size > 60) picCache.delete(picCache.keys().next().value!)
-  return bytes
+  } catch { out = null }
+  modelCache.set(key, out)
+  if (modelCache.size > 40) modelCache.delete(modelCache.keys().next().value!)
+  return out
 }
 
-async function showPic(title: string, model: string) {
-  picWant = `${title}|${model}`
-  if (picBusy || picWant === picShown) return
-  picBusy = true
+// ---------- drawing (TeleGift app style, grayscale) ----------
+const FONT = '-apple-system, "SF Pro Text", "Helvetica Neue", system-ui, sans-serif'
+// The lens brightens dark grays a lot (measured in the simulator: 12 → 38 %, 32 → 51 %, 64 → 70 %, 128 → 96 %),
+// so "dim" colors here are very dark, fills are black and shapes are drawn with thin lines.
+const C = { text: '#ffffff', dim: '#383838', faint: '#161616', line: '#1e1e1e', media: '#000000', card: '#000000' }
+
+function rrect(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) {
+  ctx.beginPath(); ctx.roundRect(x, y, w, h, r)
+}
+function pill(ctx: CanvasRenderingContext2D, x: number, y: number, text: string, font: string, fill: string, color: string, right = false) {
+  ctx.font = font
+  const w = ctx.measureText(text).width + 14
+  const px = right ? x - w : x
+  rrect(ctx, px, y, w, 20, 10); ctx.fillStyle = fill; ctx.fill(); ctx.strokeStyle = C.line; ctx.lineWidth = 1; ctx.stroke()
+  ctx.fillStyle = color; ctx.textBaseline = 'middle'; ctx.fillText(text, px + 7, y + 10.5)
+  return w
+}
+function fit(ctx: CanvasRenderingContext2D, text: string, max: number) {
+  if (ctx.measureText(text).width <= max) return text
+  while (text.length > 1 && ctx.measureText(text + '…').width > max) text = text.slice(0, -1)
+  return text + '…'
+}
+const usd = (v: number | null) => (v == null ? '' : `≈ $${v < 100 ? v.toFixed(2).replace(/\.00$/, '') : Math.round(v)}`)
+const priceText = (d: Deal) => (d.cur === 'STARS' ? `${num(d.price)} ★` : `${d.price < 100 ? d.price : Math.round(d.price)} GRAM`)
+
+function header(ctx: CanvasRenderingContext2D, right: string) {
+  ctx.textBaseline = 'alphabetic'
+  ctx.fillStyle = C.text; ctx.font = `800 19px ${FONT}`
+  ctx.fillText('TELEGIFT', 10, 24)
+  ctx.font = `500 13px ${FONT}`; ctx.fillStyle = C.dim
+  const w = ctx.measureText(right).width
+  ctx.fillText(right, W - 12 - w, 23)
+  ctx.fillStyle = C.line; ctx.fillRect(10, 33, W - 20, 1)
+}
+
+function drawDeal(ctx: CanvasRenderingContext2D, d: Deal, pic: HTMLCanvasElement | null, pos: string) {
+  header(ctx, pos)
+  // ---- gift card (like a card in the Live feed) ----
+  const cx = 10, cy = 42, cw = 214, ch = 206
+  rrect(ctx, cx, cy, cw, ch, 14); ctx.fillStyle = C.card; ctx.fill()
+  ctx.strokeStyle = C.line; ctx.lineWidth = 1; ctx.stroke()
+  const mh = 128
+  ctx.save(); rrect(ctx, cx + 1, cy + 1, cw - 2, mh, 13); ctx.clip()
+  ctx.fillStyle = C.media; ctx.fillRect(cx, cy, cw, mh + 2)
+  if (pic) { const s = mh * 0.86; ctx.drawImage(pic, cx + (cw - s) / 2, cy + (mh - s) / 2 + 4, s, s) }
+  ctx.restore()
+  ctx.fillStyle = C.faint; ctx.fillRect(cx + 1, cy + mh + 1, cw - 2, 1)
+  pill(ctx, cx + 7, cy + 7, MARKET[d.market] || d.market, `700 11px ${FONT}`, '#000', C.text)
+  pill(ctx, cx + cw - 7, cy + 7, `↗ ${d.x.toFixed(2).replace(/0$/, '')}×`, `800 12px ${FONT}`, '#000', '#fff', true)
+  ctx.textBaseline = 'alphabetic'
+  let y = cy + mh + 22
+  ctx.font = `700 15px ${FONT}`; ctx.fillStyle = C.text
+  const name = fit(ctx, d.title, cw - 90)
+  ctx.fillText(name, cx + 10, y)
+  const nw = ctx.measureText(name).width
+  ctx.font = `500 14px ${FONT}`; ctx.fillStyle = C.dim; ctx.fillText(` #${d.num}`, cx + 10 + nw, y)
+  y += 18
+  ctx.font = `500 12px ${FONT}`; ctx.fillStyle = C.dim
+  ctx.fillText(fit(ctx, `${d.model} · ${d.backdrop}`, cw - 20), cx + 10, y)
+  y += 26
+  ctx.font = `800 17px ${FONT}`; ctx.fillStyle = C.text
+  const pt = priceText(d); ctx.fillText(pt, cx + 10, y)
+  const pw = ctx.measureText(pt).width
+  ctx.font = `600 12px ${FONT}`; ctx.fillStyle = C.dim; ctx.fillText(` ${usd(d.usd)}`, cx + 12 + pw, y)
+
+  // ---- why it is a deal (right side) ----
+  const rx = 242
+  ctx.font = `600 12px ${FONT}`; ctx.fillStyle = C.dim; ctx.fillText('UNDERPRICED', rx, 62)
+  ctx.font = `800 46px ${FONT}`; ctx.fillStyle = '#fff'
+  const xs = `↗ ${d.x.toFixed(2).replace(/0$/, '')}×`; ctx.fillText(xs, rx - 2, 108)
+  ctx.font = `500 13px ${FONT}`; ctx.fillStyle = C.dim; ctx.fillText('vs the top sale of this model + backdrop', rx, 128)
+  ctx.fillStyle = C.line; ctx.fillRect(rx, 142, W - rx - 12, 1)
+  const rows: [string, string][] = [
+    ['Floor', d.floor ? `${num(d.floor)} ★` : d.cheapest ? 'cheapest on sale' : '—'],
+    ['Sales', d.sales ? `${d.sales} of this model + backdrop` : '—'],
+    ['Listed', `${ago(d.seen_s)} · ${MARKET[d.market] || d.market}`],
+  ]
+  let ry = 164
+  for (const [k, v] of rows) {
+    ctx.font = `500 13px ${FONT}`; ctx.fillStyle = C.dim; ctx.fillText(k, rx, ry)
+    ctx.font = `600 14px ${FONT}`; ctx.fillStyle = C.text; ctx.fillText(fit(ctx, v, W - rx - 82), rx + 64, ry)
+    ry += 22
+  }
+  // button like "Buy" in the app
+  const label = token ? 'Tap — send to Telegram' : 'Tap — link Telegram'
+  ctx.font = `700 14px ${FONT}`
+  const bw = ctx.measureText(label).width + 28
+  rrect(ctx, rx, 222, bw, 26, 13); ctx.fillStyle = '#e8e8e8'; ctx.fill()
+  ctx.fillStyle = '#000'; ctx.textBaseline = 'middle'; ctx.fillText(label, rx + 14, 235.5); ctx.textBaseline = 'alphabetic'
+}
+
+function drawMessage(ctx: CanvasRenderingContext2D, right: string, title: string, lines: string[], big?: string) {
+  header(ctx, right)
+  ctx.textBaseline = 'alphabetic'
+  ctx.font = `700 20px ${FONT}`; ctx.fillStyle = C.text; ctx.fillText(title, 24, 76)
+  let y = 108
+  ctx.font = `500 15px ${FONT}`; ctx.fillStyle = C.dim
+  for (const l of lines) { ctx.fillText(l, 24, y); y += 24 }
+  if (big) { ctx.font = `800 48px ${FONT}`; ctx.fillStyle = '#fff'; ctx.fillText(big, 24, y + 40) }
+}
+
+// send the canvas to the glasses as 4 tiles, one update at a time; skip tiles that did not change
+const sentTile = new Map<number, string>()
+let drawing = false
+let wanted: (() => Promise<HTMLCanvasElement>) | null = null
+
+async function show(render: () => Promise<HTMLCanvasElement>) {
+  wanted = render
+  if (drawing) return
+  drawing = true
   try {
-    while (picWant !== picShown) {
-      const want = picWant
-      const [t, m] = want.split('|')
-      const bytes = t && m ? await picBytes(t, m) : await picBytes('', '')
-      await bridge.updateImageRawData(new ImageRawDataUpdate({ containerID: 4, containerName: 'pic', imageData: bytes }))
-      picShown = want
+    while (wanted) {
+      const r = wanted; wanted = null
+      const full = await r()
+      for (const t of TILES) {
+        const c = document.createElement('canvas'); c.width = t.w; c.height = t.h
+        const ctx = c.getContext('2d')!
+        ctx.fillStyle = '#000'; ctx.fillRect(0, 0, t.w, t.h)
+        ctx.drawImage(full, -t.x, -t.y)
+        const url = c.toDataURL('image/png')
+        if (sentTile.get(t.id) === url) continue
+        const blob: Blob = await new Promise((res) => c.toBlob((b) => res(b!), 'image/png'))
+        const bytes = Array.from(new Uint8Array(await blob.arrayBuffer()))
+        await bridge.updateImageRawData(new ImageRawDataUpdate({ containerID: t.id, containerName: t.name, imageData: bytes }))
+        sentTile.set(t.id, url)
+      }
     }
-  } catch { /* keep text working even if the picture fails */ } finally { picBusy = false }
+  } catch { /* keep going on the next paint */ } finally { drawing = false }
+}
+
+function blank() {
+  const c = document.createElement('canvas'); c.width = W; c.height = H
+  const ctx = c.getContext('2d')!; ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H)
+  return { c, ctx }
 }
 
 // ---------- state ----------
@@ -131,43 +261,37 @@ function ago(s: number) {
   if (s < 3600) return `${Math.floor(s / 60)} min ago`
   return `${Math.floor(s / 3600)} h ago`
 }
-function priceLine(d: Deal) {
-  const p = d.cur === 'STARS' ? `${num(d.price)} Stars` : `${d.price} GRAM`
-  return d.usd ? `${p}   ~ $${d.usd}` : p
-}
-
 function paint() {
+  const tip = Date.now() < toastUntil ? toastText : null
   if (mode === 'pair') {
-    showPic('', '')
-    put(1, 'head', 'TELEGIFT GLANCE  |  link Telegram')
-    put(2, 'body', pairCode
-      ? `Get deals sent to your Telegram:\n\n1. Open @telefeedgifts_ai\n2. Send this code:  ${pairCode.slice(0, 3)} ${pairCode.slice(3)}\n\nWaiting...`
-      : 'Connecting...')
-    put(3, 'foot', 'tap: skip (view only)   double tap: exit')
+    const code = pairCode
+    show(async () => {
+      const { c, ctx } = blank()
+      if (code) drawMessage(ctx, 'link Telegram', 'Get deals in your Telegram', ['1.  Open @telefeedgifts_ai', '2.  Send this code:'], `${code.slice(0, 3)} ${code.slice(3)}`)
+      else drawMessage(ctx, 'link Telegram', 'Connecting…', [])
+      return c
+    })
+    put(5, 'foot', tip || 'tap: skip (view only)   double tap: exit')
     return
   }
   const total = deals.length
   if (!total) {
-    showPic('', '')
-    put(1, 'head', 'TELEGIFT GLANCE  |  live')
-    put(2, 'body', 'No underpriced gifts in the last hour.\n\nWatching Telegram Market, MRKT, Portals,\nTonnel and on-chain... new deals appear here.')
-    put(3, 'foot', 'double tap: exit')
+    show(async () => {
+      const { c, ctx } = blank()
+      drawMessage(ctx, 'live', 'No underpriced gifts in the last hour', ['Watching Telegram Market, MRKT, Portals,', 'Tonnel and on-chain — new deals appear here.'])
+      return c
+    })
+    put(5, 'foot', tip || 'double tap: exit')
     return
   }
   const d = deals[Math.min(idx, total - 1)]
-  showPic(d.title, d.model)
-  const badge = idx === 0 && d.seen_s < 120 ? 'NEW  ' : ''
-  put(1, 'head', `TELEGIFT  deal ${idx + 1}/${total}` + (fresh ? `   +${fresh} new` : '   live'))
-  put(2, 'body', [
-    `${badge}${d.title} #${d.num}`,
-    `${d.model} | ${d.backdrop}`,
-    priceLine(d),
-    `x${d.x} vs top sale`,
-    d.floor ? `floor ${num(d.floor)} Stars` : d.cheapest ? 'cheapest on sale' : '',
-    `${MARKET[d.market] || d.market}  |  ${ago(d.seen_s)}` + (d.sales ? `  |  ${d.sales} sales` : ''),
-  ].join('\n'))
-  const tip = token ? 'tap: send to Telegram' : 'tap: link Telegram'
-  put(3, 'foot', Date.now() < toastUntil ? toastText : `${tip}   swipe: next   2x tap: exit`)
+  const pos = `${idx === 0 && d.seen_s < 120 ? 'NEW · ' : ''}deal ${idx + 1}/${total}` + (fresh ? ` · +${fresh} new` : ' · live')
+  show(async () => {
+    const { c, ctx } = blank()
+    drawDeal(ctx, d, await modelPicture(d.title, d.model, 160), pos)
+    return c
+  })
+  put(5, 'foot', tip || 'swipe: next deal    double tap: exit')
 }
 
 function toast(t: string, ms = 2500) {
@@ -193,7 +317,10 @@ async function poll() {
       idx = 0; fresh = 0
     }
   } catch {
-    if (!deals.length) { put(2, 'body', 'No connection to the deal feed.\nRetrying...'); return }
+    if (!deals.length) {
+      show(async () => { const { c, ctx } = blank(); drawMessage(ctx, 'offline', 'No connection to the deal feed', ['Retrying…']); return c })
+      return
+    }
   }
   if (mode === 'deals') paint()
 }
