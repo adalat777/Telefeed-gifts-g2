@@ -102,7 +102,7 @@ def save_settings():
 
 
 def settings_of(chat):
-    st = {"min": 0, "markets": None, "cols": None, "quiet": None}
+    st = {"min": 0, "markets": None, "cols": None, "quiet": None, "anim": "loop"}
     st.update(_settings.get(str(chat)) or {})
     return st
 
@@ -136,7 +136,8 @@ def settings_text(st):
             f"• Minimum resell profit: {'any' if not st.get('min') else '$' + str(st['min'])}\n"
             f"• Marketplaces: {mk}\n"
             f"• Collections: {cols}\n"
-            f"• Quiet hours (no pop-ups): {q}\n\n"
+            f"• Quiet hours (no pop-ups): {q}\n"
+            f"• Gift animation: {'plays once' if st.get('anim') == 'once' else 'loops'}\n\n"
             "Collections: send /collections Plush Pepe, Mirage Lamp  (or /collections all)")
 
 
@@ -151,6 +152,9 @@ def settings_keyboard(st):
     qn = str(st.get("quiet"))
     rows.append([{"text": ("✓ " if str(q) == qn else "") + ("no quiet hours" if not q else f"quiet {q[0]}–{q[1]}"),
                   "callback_data": "set:quiet:" + ("off" if not q else f"{q[0]}-{q[1]}")} for q in QUIET_STEPS])
+    once = st.get("anim") == "once"
+    rows.append([{"text": ("· " if once else "✓ ") + "animation: loop", "callback_data": "set:anim:loop"},
+                 {"text": ("✓ " if once else "· ") + "animation: once", "callback_data": "set:anim:once"}])
     return {"inline_keyboard": rows}
 
 
@@ -166,6 +170,8 @@ def change_setting(chat, what, value):
         st["quiet"] = None if value == "off" else [int(x) for x in value.split("-")]
     elif what == "cols":
         st["cols"] = value or None
+    elif what == "anim":
+        st["anim"] = "once" if value == "once" else "loop"
     with _lock:
         _settings[str(chat)] = st
         save_settings()
@@ -709,6 +715,7 @@ class H(BaseHTTPRequestHandler):
                 st = settings_of(chat) if chat else None
                 items = [i for i in out["items"] if not st or matches(st, i)][:limit]
                 return self._send(200, dict(out, items=items, quiet=bool(st and is_quiet(st)),
+                                            anim=(st or {}).get("anim") or "loop",
                                             filtered=bool(st and (st.get("min") or st.get("markets") or st.get("cols")))))
             except (ValueError, sqlite3.Error) as e:
                 return self._send(503, {"error": type(e).__name__})

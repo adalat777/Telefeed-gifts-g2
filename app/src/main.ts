@@ -220,6 +220,7 @@ async function playModel(d: Deal) {
   let shown = 0
   for (;;) {
     if (deals[idx]?.id !== d.id || view !== 'glance' || asleep || (confirmDeal && Date.now() < confirmUntil)) break
+    if (animOnce && performance.now() - start >= dur) break      // the user chose "once" in the bot's /settings
     const el = (performance.now() - start) % dur
     const i = Math.min(frames.length - 1, Math.floor((el / dur) * frames.length))
     if (i === animStep) { await new Promise((res) => setTimeout(res, 8)); continue }
@@ -662,6 +663,7 @@ let mode: 'pair' | 'deals' = token ? 'deals' : 'pair'
 let view: 'glance' | 'card' | 'detail' = 'glance'
 let asleep = false                               // quiet by default: the lens goes dark and wakes on a matching deal
 let lastActive = Date.now()
+let animOnce = false                             // bot /settings: play the gift animation once instead of looping
 let quiet = false                                // quiet hours from the bot /settings: no pop-ups
 let filtered = false
 const AWAKE_MS = 600000                           // 10 min: in the simulator only Click wakes it (swipes need a scrollable container)
@@ -782,8 +784,8 @@ async function poll() {
   try {
     const r = await fetch(`${API}/signals?limit=20&minutes=60` + (token ? `&token=${encodeURIComponent(token)}` : ''))
     if (!r.ok) throw new Error(String(r.status))
-    const data = await r.json() as { items: Deal[]; gone?: string[]; quiet?: boolean; filtered?: boolean }
-    quiet = !!data.quiet; filtered = !!data.filtered
+    const data = await r.json() as { items: Deal[]; gone?: string[]; quiet?: boolean; filtered?: boolean; anim?: string }
+    animOnce = data.anim === 'once'; quiet = !!data.quiet; filtered = !!data.filtered
     const goneSet = new Set(data.gone || [])
     const known = new Set(deals.map((d) => d.id))
     const curDeal = deals[idx]
