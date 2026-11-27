@@ -13,6 +13,7 @@ import {
   ImageRawDataUpdate,
   OsEventTypeList,
 } from '@evenrealities/even_hub_sdk'
+import lottie from 'lottie-web/build/player/lottie_light_canvas'
 
 type Deal = {
   id: string; title: string; num: number; model: string; backdrop: string; pattern?: string
@@ -73,8 +74,16 @@ async function modelPicture(title: string, model: string, size: number): Promise
   let out: HTMLCanvasElement | null = null
   try {
     const r = await fetch(`${API}/model?c=${encodeURIComponent(title)}&m=${encodeURIComponent(model)}`)
-    if (r.ok) {
-      const bmp = await createImageBitmap(await r.blob())
+    if (r.ok) out = lensify(await createImageBitmap(await r.blob()), size).c
+  } catch { out = null }
+  modelCache.set(key, out)
+  if (modelCache.size > 40) modelCache.delete(modelCache.keys().next().value!)
+  return out
+}
+
+// A colour picture of the model → the lens look. `range` fixes the brightness range (animation frames share the first one's,
+// otherwise every frame would be stretched on its own and the model would flicker).
+function lensify(bmp: CanvasImageSource & { width: number; height: number }, size: number, range?: [number, number]) {
       const c = document.createElement('canvas'); c.width = c.height = size
       const ctx = c.getContext('2d')!
       const k = Math.min(size / bmp.width, size / bmp.height)
@@ -98,8 +107,8 @@ async function modelPicture(title: string, model: string, size: number): Promise
         if (alpha[p] > 0.5) vals.push(lum[p])
       }
       vals.sort((a, b) => a - b)
-      const lo = vals.length ? vals[Math.floor(vals.length * 0.04)] : 0
-      const hi = vals.length ? vals[Math.floor(vals.length * 0.97)] : 255
+      const lo = range ? range[0] : vals.length ? vals[Math.floor(vals.length * 0.04)] : 0
+      const hi = range ? range[1] : vals.length ? vals[Math.floor(vals.length * 0.97)] : 255
       const span = Math.max(20, hi - lo)
       const tone = new Float32Array(N)
       for (let p = 0; p < N; p++) tone[p] = Math.min(1, Math.max(0, (lum[p] - lo) / span)) * alpha[p]
@@ -124,12 +133,63 @@ async function modelPicture(title: string, model: string, size: number): Promise
         d[i] = d[i + 1] = d[i + 2] = v; d[i + 3] = Math.round(alpha[p] * 255)
       }
       ctx.putImageData(img, 0, 0)
-      out = c
-    }
-  } catch { out = null }
-  modelCache.set(key, out)
-  if (modelCache.size > 40) modelCache.delete(modelCache.keys().next().value!)
-  return out
+      return { c, range: [lo, hi] as [number, number] }
+}
+
+// ---------- model animation: a few frames of the gift's own animation, played once when a new deal shows ----------
+// Only gifts that are on Fragment have it (on-chain collections); the others keep the still picture.
+const ANIM_FRAMES = 10, ANIM_MS = 330          // ~3 frames a second: the lens redraws only the tiles that changed
+const animCache = new Map<string, Promise<HTMLCanvasElement[] | null>>()
+
+function modelFrames(slug: string): Promise<HTMLCanvasElement[] | null> {
+  if (!animCache.has(slug)) {
+    animCache.set(slug, (async () => {
+      try {
+        const r = await fetch(`${API}/model-anim?slug=${encodeURIComponent(slug)}`)
+        if (!r.ok) return null
+        const data = await r.json()
+        const box = document.createElement('div')
+        box.style.cssText = 'position:fixed;left:-9999px;top:0;width:256px;height:256px;overflow:hidden'
+        document.body.appendChild(box)
+        const a = lottie.loadAnimation({ container: box, renderer: 'canvas', loop: false, autoplay: false, animationData: data,
+          rendererSettings: { clearCanvas: true } })
+        await new Promise<void>((res) => { if (a.isLoaded) res(); else { a.addEventListener('DOMLoaded', () => res()); setTimeout(res, 1500) } })
+        const cv = box.querySelector('canvas')
+        if (!cv) { a.destroy(); box.remove(); return null }
+        const n = Math.max(1, a.totalFrames - 1)
+        const out: HTMLCanvasElement[] = []
+        let range: [number, number] | undefined
+        for (let i = 0; i < ANIM_FRAMES; i++) {
+          a.goToAndStop(Math.round((i * n) / ANIM_FRAMES), true)
+          const f = lensify(cv, MODEL_PX, range)
+          range = range || f.range
+          out.push(f.c)
+          await new Promise((res) => setTimeout(res, 0))       // let the lens keep drawing meanwhile
+        }
+        a.destroy(); box.remove()
+        return out
+      } catch { return null }
+    })())
+    if (animCache.size > 20) animCache.delete(animCache.keys().next().value!)
+  }
+  return animCache.get(slug)!
+}
+
+let animId = '', animStep = -1                  // the deal being animated and the frame shown (-1: still picture)
+const animated = new Set<string>()              // each deal plays once
+async function playModel(d: Deal) {
+  if (animated.has(d.id) || animId) return
+  animated.add(d.id)
+  const frames = await modelFrames(d.id)
+  if (!frames || deals[idx]?.id !== d.id || view !== 'glance' || asleep) return
+  animId = d.id
+  for (let i = 0; i < frames.length; i++) {
+    if (deals[idx]?.id !== d.id || view !== 'glance' || asleep) break
+    animStep = i; paint()
+    await new Promise((res) => setTimeout(res, ANIM_MS))
+  }
+  animId = ''; animStep = -1
+  if (deals[idx]?.id === d.id) paint()
 }
 
 // ---------- gift backdrop + pattern symbols (from the full gift picture) ----------
@@ -581,9 +641,11 @@ function paint() {
     const pos = `${idx === 0 && d.seen_s < 120 ? 'NEW · ' : ''}${idx + 1}/${total}` + (fresh ? ` · +${fresh} new` : '') + (filtered ? ' · your filters' : '')
     show(async () => {
       const { c, ctx } = blank()
-      drawGlance(ctx, d, await modelPicture(d.title, d.model, MODEL_PX), pos)
+      const frames = animId === d.id && animStep >= 0 ? await modelFrames(d.id) : null
+      drawGlance(ctx, d, frames ? frames[animStep] : await modelPicture(d.title, d.model, MODEL_PX), pos)
       return c
     })
+    if (!d.sold) playModel(d)
     put(5, 'foot', tip || (d.sold ? 'tap: next deal' : `${token ? 'tap: send' : 'tap: link Telegram'}    2× tap: next    hold: more`), tip ? 4 : 1)
     return
   }

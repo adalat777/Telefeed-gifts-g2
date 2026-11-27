@@ -6,6 +6,7 @@ Small stdlib-only HTTP server (no dependencies):
   POST /pair                           start pairing: returns a 6-digit code to send to the Telegram bot
   GET  /pair/<code>                    poll: {"paired": true, "token": "..."} once the code was sent to the bot
   POST /send {"token", "item"}         the bot sends this deal to the paired Telegram chat (link + "Open gift" button)
+  GET  /model-anim?slug=<gift slug>      model animation (Fragment lottie, only the 'Gift' layer, cached on disk)
   GET  /model?c=<collection>&m=<model>  PNG of the gift model without background (cdn.changes.tg, cached on disk)
   GET  /gift?slug=<slug>             the full gift picture (backdrop + pattern symbols + model) from Fragment, cached
   GET  /detail?c=&m=&b=               last 30 days: daily median sale price (Telegram Market) + median per marketplace
@@ -295,6 +296,49 @@ def model_png(col, model):
 
 
 FRAGMENT_GIFT = "https://nft.fragment.com/gift/{}.webp"
+FRAGMENT_LOTTIE = "https://nft.fragment.com/gift/{}.lottie.json"
+_anim_lock = threading.Lock()
+
+
+def model_anim(slug):
+    """The gift's animation from Fragment with only the model layer ("Gift") — JSON bytes, cached on disk; None if absent."""
+    if not re.fullmatch(r"[A-Za-z0-9]+-\d{1,9}", slug or ""):
+        return None
+    path = os.path.join(IMG_CACHE, "anim_" + slug.lower() + ".json")
+    miss = path[:-5] + ".none"
+    if os.path.exists(path):
+        return open(path, "rb").read()
+    if os.path.exists(miss) and time.time() - os.path.getmtime(miss) < 7 * 86400:
+        return None
+    with _anim_lock:
+        try:
+            req = urllib.request.Request(FRAGMENT_LOTTIE.format(slug.lower()),
+                                         headers={"User-Agent": "TeleGiftGlance/1.0", "Accept": "application/json"})
+            with urllib.request.urlopen(req, timeout=15, context=SSL) as r:
+                raw = r.read(8_000_000)
+        except urllib.error.HTTPError as e:
+            raw = None if e.code in (403, 404, 410) else b""
+        except Exception:
+            raw = b""
+        os.makedirs(IMG_CACHE, exist_ok=True)
+        if raw is None:
+            open(miss, "w").close()
+            return None
+        if not raw:
+            return None
+        try:
+            d = json.loads(raw)
+            keep = [x for x in d.get("layers") or [] if (x.get("nm") or "").strip().lower() == "gift"]
+        except (ValueError, AttributeError):
+            keep = []
+        if not keep:
+            open(miss, "w").close()
+            return None
+        d["layers"] = keep
+        data = json.dumps(d, separators=(",", ":")).encode()
+        with open(path, "wb") as f:
+            f.write(data)
+        return data
 TELEFEED_GIFTS = os.path.normpath(os.path.join(HERE, "..", "..", "data", "gifts"))      # TeleFeed's own cache
 IMG_MAGIC = (b"\x89PNG", b"\xff\xd8\xff", b"RIFF", b"GIF8")
 
@@ -684,6 +728,19 @@ class H(BaseHTTPRequestHandler):
                 return self._send(404, {"error": "no picture"})
             self.send_response(200)
             self.send_header("Content-Type", image_type(data))
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.send_header("Cache-Control", "max-age=86400")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+            return
+        if u.path == "/model-anim":
+            q = urllib.parse.parse_qs(u.query)
+            data = model_anim((q.get("slug") or [""])[0][:80])
+            if not data:
+                return self._send(404, {"error": "no animation"})
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
             self.send_header("Access-Control-Allow-Origin", "*")
             self.send_header("Cache-Control", "max-age=86400")
             self.send_header("Content-Length", str(len(data)))
