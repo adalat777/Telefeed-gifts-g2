@@ -6,6 +6,7 @@ Small stdlib-only HTTP server (no dependencies):
   POST /pair                           start pairing: returns a 6-digit code to send to the Telegram bot
   GET  /pair/<code>                    poll: {"paired": true, "token": "..."} once the code was sent to the bot
   POST /send {"token", "item"}         the bot sends this deal to the paired Telegram chat (link + "Open gift" button)
+  GET  /full?c=&m=&b=&slug=&stars=&mr=&br=  the app's 'Full gift info': floors, supply, sales history, lots on sale
   GET  /model-anim?slug=<gift slug>      model animation (Fragment lottie, only the 'Gift' layer, cached on disk)
   GET  /model?c=<collection>&m=<model>  PNG of the gift model without background (cdn.changes.tg, cached on disk)
   GET  /gift?slug=<slug>             the full gift picture (backdrop + pattern symbols + model) from Fragment, cached
@@ -544,6 +545,7 @@ def signals(limit=20, minutes=60):
             "fair": res.get("fair") or h.get("typical"), "stars": stars_now,
             "rs_pct": (d.get("rstat") or {}).get("kw") or (d.get("rstat") or {}).get("cw"),
             "rs_good": bool((d.get("rstat") or {}).get("good")),
+            "mr": d.get("model_rarity"), "br": d.get("backdrop_rarity"), "pr": d.get("pattern_rarity"),
         })
     out = {"now": int(time.time()), "items": items, "gone": gone}
     _cache[key] = (time.time(), out)
@@ -604,36 +606,36 @@ def sales_history(col, model, backdrop, slug="", n=7):
     hit = _hist_cache.get(key)
     if hit and time.time() - hit[0] < 60:
         return hit[1]
-    since = time.time() - 90 * 86400
+    since = time.time() - 3 * 365 * 86400   # all the history we have (Telegram Market since 04.2025)
     since_iso = time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime(since))
     db = sqlite3.connect(f"file:{DB}?mode=ro", uri=True, timeout=5)
-    rows = []          # (ts, market, cur, price, ton, slug, num)
+    rows = []          # (ts, market, cur, price, ton, slug, num, pattern)
     try:
         r = db.execute("SELECT usd FROM ton_usd ORDER BY day DESC LIMIT 1").fetchone()
         rate = float(r[0]) if r else None
-        for t, cur, price, norm, sl in db.execute(
-                "SELECT sold_at, currency, price, normalized, slug FROM sales INDEXED BY sales_combo "
-                "WHERE collection=? AND model=? AND backdrop=? AND sold_at >= ? ORDER BY sold_at DESC LIMIT 300",
+        for t, cur, price, norm, sl, sym in db.execute(
+                "SELECT sold_at, currency, price, normalized, slug, symbol FROM sales INDEXED BY sales_combo "
+                "WHERE collection=? AND model=? AND backdrop=? AND sold_at >= ? ORDER BY sold_at DESC LIMIT 1000",
                 (col, model, backdrop, since_iso)):
             if cur == "STARS" and price:
-                rows.append((_iso_ts(t), "telegram", "STARS", price, norm, sl, _num_of(sl)))
+                rows.append((_iso_ts(t), "telegram", "STARS", price, norm, sl, _num_of(sl), sym))
             elif norm:
-                rows.append((_iso_ts(t), "telegram", "GRAM", norm, norm, sl, _num_of(sl)))
+                rows.append((_iso_ts(t), "telegram", "GRAM", norm, norm, sl, _num_of(sl), sym))
         for m in ("mrkt", "portals", "tonnel", "getgems"):
             try:
-                for t, ton, sl in db.execute(
-                        "SELECT sold_at, ton, slug FROM msales INDEXED BY msales_combo WHERE market=? AND collection=? "
+                for t, ton, sl, sym in db.execute(
+                        "SELECT sold_at, ton, slug, symbol FROM msales INDEXED BY msales_combo WHERE market=? AND collection=? "
                         "AND model=? AND backdrop=? AND sold_at >= ? ORDER BY sold_at DESC LIMIT 100", (m, col, model, backdrop, since_iso)):
                     if ton:
-                        rows.append((_iso_ts(t), m, "GRAM", ton, ton, sl, _num_of(sl)))
+                        rows.append((_iso_ts(t), m, "GRAM", ton, ton, sl, _num_of(sl), sym))
             except sqlite3.Error:
                 pass
         try:
-            for t, ton, sl, num in db.execute(
-                    "SELECT sold_at, ton, slug, num FROM portals_sales WHERE title=? AND model=? AND backdrop=? AND sold_at >= ? "
+            for t, ton, sl, num, sym in db.execute(
+                    "SELECT sold_at, ton, slug, num, pattern FROM portals_sales WHERE title=? AND model=? AND backdrop=? AND sold_at >= ? "
                     "ORDER BY sold_at DESC LIMIT 100", (col, model, backdrop, since)):
                 if ton:
-                    rows.append((int(t), "portals", "GRAM", ton, ton, sl, num))
+                    rows.append((int(t), "portals", "GRAM", ton, ton, sl, num, sym))
         except sqlite3.Error:
             pass
         try:
@@ -641,7 +643,7 @@ def sales_history(col, model, backdrop, slug="", n=7):
                     "SELECT ts, ton, num FROM onchain_sales WHERE collection=? AND model=? AND backdrop=? AND ts >= ? AND src != dst "
                     "AND market NOT IN ('Telegram', 'Getgems') ORDER BY ts DESC LIMIT 100", (col, model, backdrop, int(since))):
                 if ton:
-                    rows.append((int(t), "onchain", "GRAM", ton, ton, None, num))
+                    rows.append((int(t), "onchain", "GRAM", ton, ton, None, num, None))
         except sqlite3.Error:
             pass
     finally:
@@ -663,13 +665,122 @@ def sales_history(col, model, backdrop, slug="", n=7):
     own = _num_of(slug)
     items = [{"at": x[0], "market": x[1], "cur": x[2], "price": round(x[3], 2) if x[2] == "GRAM" else int(x[3]),
               "usd": round(usd_of(x[2], x[3], x[4]), 2) if usd_of(x[2], x[3], x[4]) else None, "num": x[6],
-              "mine": bool(own and x[6] == own)} for x in uniq[:n]]
+              "mine": bool(own and x[6] == own), "pattern": x[7]} for x in uniq[:n]]
     out = {"items": items, "week": week, "total": len(uniq), "usual_usd": round(usual, 2) if usual else None,
            "top": ({"usd": round(usd_of(top[2], top[3], top[4]), 2) if usd_of(top[2], top[3], top[4]) else None,
-                    "cur": top[2], "price": round(top[3], 2) if top[2] == "GRAM" else int(top[3]), "at": top[0]} if top else None)}
+                    "cur": top[2], "price": round(top[3], 2) if top[2] == "GRAM" else int(top[3]), "at": top[0]} if top else None),
+           "top_stars": _top_stars(uniq, ok)}
     _hist_cache[key] = (time.time(), out)
     if len(_hist_cache) > 200:
         _hist_cache.pop(next(iter(_hist_cache)))
+    return out
+
+
+def _top_stars(rows, ok):
+    """The top sale for Stars (when the overall top was in GRAM), like the app's "Maximum" tile."""
+    xs = [x for x in rows if x[2] == "STARS" and x[4] in ok]
+    if not xs:
+        return None
+    t = max(xs, key=lambda x: x[3])
+    return {"price": int(t[3]), "usd": round(t[3] * STAR_OUT_USD, 2), "at": t[0]}
+
+
+TELEFEED_API = os.environ.get("TELEFEED_API", "http://127.0.0.1:8080")
+_full_cache = {}
+
+
+def _tf(path, timeout=9):
+    """Read-only call to the TeleFeed app running next to us (floors, lots on sale, supply)."""
+    try:
+        with urllib.request.urlopen(TELEFEED_API + path, timeout=timeout) as r:
+            return json.loads(r.read(2_000_000))
+    except Exception:
+        return None
+
+
+def _pct(x):
+    try:
+        return float(str(x).rstrip("%")) / 100
+    except (TypeError, ValueError):
+        return None
+
+
+def full_info(slug, col, model, backdrop, stars=None, pattern="", mr=None, br=None):
+    """The app's "Full gift info" for the glasses: floors (collection / model) across marketplaces, supply,
+    the sales history of this model + backdrop, and the same gifts on sale now on every marketplace."""
+    key = (slug, col, model, backdrop, stars)
+    hit = _full_cache.get(key)
+    if hit and time.time() - hit[0] < 30:
+        return hit[1]
+    q = urllib.parse.urlencode({"title": col, "model": model, "backdrop": backdrop, "slug": slug, "stars": stars or ""})
+    res = {}
+    jobs = {"floor": f"/api/floor?{q}", "similar": f"/api/similar?{q}",
+            "counts": "/api/gift-counts?" + urllib.parse.urlencode({"title": col})}
+    threads = [threading.Thread(target=lambda k=k, u=u: res.__setitem__(k, _tf(u))) for k, u in jobs.items()]
+    for t in threads:
+        t.start()
+    hist = sales_history(col, model, backdrop, slug, n=40)
+    for t in threads:
+        t.join(10)
+    db = sqlite3.connect(f"file:{DB}?mode=ro", uri=True, timeout=5)
+    try:
+        r = db.execute("SELECT usd FROM ton_usd ORDER BY day DESC LIMIT 1").fetchone()
+        rate = float(r[0]) if r else None
+    finally:
+        db.close()
+    usd = lambda cur, price: (round(price * STAR_USD, 2) if cur == "STARS" else (round(price * rate, 2) if rate else None))
+
+    def fl(x):
+        if not x:
+            return None
+        if x.get("ton_only") or x.get("market") not in (None, "telegram") or not x.get("stars"):
+            return {"market": x.get("market") or "telegram", "cur": "GRAM", "price": round(x.get("ton") or 0, 2)}
+        return {"market": "telegram", "cur": "STARS", "price": int(x["stars"])}
+
+    f = res.get("floor") or {}
+    sim = res.get("similar") or {}
+    lots = []
+    for it in ((sim.get("same") or {}).get("items") or []):
+        if it.get("ton_only") or not it.get("stars"):
+            lots.append({"market": "telegram", "num": it.get("num"), "pattern": it.get("pattern"), "cur": "GRAM",
+                         "price": round(it.get("ton") or 0, 2)})
+        else:
+            lots.append({"market": "telegram", "num": it.get("num"), "pattern": it.get("pattern"), "cur": "STARS",
+                         "price": int(it["stars"])})
+    for it in sim.get("markets") or []:
+        if it.get("ton"):
+            lots.append({"market": it.get("market"), "num": it.get("num"), "pattern": it.get("pattern"), "cur": "GRAM",
+                         "price": round(it["ton"], 2), "listed_at": it.get("listed_at")})
+    for it in ((sim.get("onchain") or {}).get("items") or []):
+        ton = it.get("ton") or it.get("price")
+        if ton and (it.get("currency") in (None, "GRAM", "TON")):
+            lots.append({"market": "onchain", "num": it.get("num"), "pattern": it.get("pattern"), "cur": "GRAM",
+                         "price": round(float(ton), 2), "listed_at": it.get("listed_at")})
+    own = _num_of(slug)
+    seen, uniq = set(), []
+    for x in lots:
+        x["usd"] = usd(x["cur"], x["price"])
+        if not x["usd"] or (own and x.get("num") == own):
+            continue
+        k = (x.get("num"), x["market"])
+        if k in seen:
+            continue
+        seen.add(k)
+        uniq.append(x)
+    uniq.sort(key=lambda x: x["usd"])
+    cnt = res.get("counts") or {}
+    issued = cnt.get("issued")
+    pm, pb = _pct(mr), _pct(br)
+    out = {
+        "floor_col": fl(f.get("collection")), "floor_model": fl(f.get("model")),
+        "issued": issued, "supply": cnt.get("supply"),
+        "n_model": int(issued * pm) if issued and pm else None,
+        "n_combo": int(issued * pm * pb) if issued and pm and pb else None,
+        "history": hist, "on_sale": uniq[:20], "on_sale_wait": not sim,
+    }
+    _full_cache[key] = (time.time(), out)
+    if len(_full_cache) > 100:
+        _full_cache.pop(next(iter(_full_cache)))
     return out
 
 
@@ -831,6 +942,19 @@ class H(BaseHTTPRequestHandler):
                 return self._send(400, {"error": "need c, m, b"})
             try:
                 return self._send(200, sales_history(c, m, b, (q.get("slug") or [""])[0][:80]))
+            except sqlite3.Error as e:
+                return self._send(503, {"error": type(e).__name__})
+        if u.path == "/full":
+            q = urllib.parse.parse_qs(u.query)
+            g = lambda k, n=80: (q.get(k) or [""])[0][:n]
+            if not (g("c") and g("m") and g("b")):
+                return self._send(400, {"error": "need c, m, b"})
+            try:
+                stars = int(float(g("stars"))) if g("stars") else None
+            except ValueError:
+                stars = None
+            try:
+                return self._send(200, full_info(g("slug"), g("c", 64), g("m", 64), g("b", 64), stars, g("p", 64), g("mr", 8), g("br", 8)))
             except sqlite3.Error as e:
                 return self._send(503, {"error": type(e).__name__})
         if u.path == "/gift":

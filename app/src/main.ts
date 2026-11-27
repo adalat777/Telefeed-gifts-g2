@@ -21,6 +21,7 @@ type Deal = {
   typical: number | null; max: number | null; sales: number | null; market: string; url: string | null; seen_s: number
   resell?: { sell: number; net: number; cost_usd: number; get_usd: number; profit_usd: number } | null
   fair?: number | null; stars?: number | null; rs_pct?: number | null; rs_good?: boolean
+  mr?: string | null; br?: string | null; pr?: string | null
   sold?: boolean
 }
 
@@ -207,6 +208,7 @@ function fullest(frames: Frames) {
   return ink(frames[0]) >= 0.8 * ink(mid) ? frames[0] : mid
 }
 
+const animView = () => view === 'glance' || (view === 'history' && fpage === 0)
 let animId = '', animStep = -1                  // the deal being animated and the frame shown (-1: still picture)
 const animated = new Set<string>()              // deals whose animation is loading or looping now
 async function playModel(d: Deal) {
@@ -214,13 +216,13 @@ async function playModel(d: Deal) {
   animated.add(d.id)
   const frames = await modelFrames(d.id)
   if (!frames) return                                          // no animation: stays marked, the still picture is used
-  if (deals[idx]?.id !== d.id || view !== 'glance' || asleep) { animated.delete(d.id); return }
+  if (deals[idx]?.id !== d.id || !animView() || asleep) { animated.delete(d.id); return }
   animId = d.id
   // loops without a stop while this deal is on the glance; leaves → stops (and starts again when you come back)
   const dur = frames.dur || 3000, start = performance.now()
   let shown = 0
   for (;;) {
-    if (deals[idx]?.id !== d.id || view !== 'glance' || asleep || (confirmDeal && Date.now() < confirmUntil)) break
+    if (deals[idx]?.id !== d.id || !animView() || asleep || (confirmDeal && Date.now() < confirmUntil)) break
     if (animOnce && performance.now() - start >= dur) break      // the user chose "once" in the bot's /settings
     const el = (performance.now() - start) % dur
     const i = Math.min(frames.length - 1, Math.floor((el / dur) * frames.length))
@@ -477,20 +479,33 @@ function drawDeal(ctx: CanvasRenderingContext2D, d: Deal, pic: HTMLCanvasElement
 
 const comboKey = (d: Deal) => `${d.title}|${d.model}|${d.backdrop}`
 
-// ---------- sales history: tap on a deal → the last sales of this model + backdrop on every marketplace ----------
-type Hist = { items: { at: number; market: string; cur: 'STARS' | 'GRAM'; price: number; usd: number | null; num: number | null; mine: boolean }[]
-  week: number; total: number; usual_usd: number | null; top: { usd: number | null; cur: string; price: number; at: number } | null }
-const histCache = new Map<string, { at: number; v: Hist | 'loading' | 'error' }>()
+// ---------- full gift info (the app's "Full gift info" window, on the lens) ----------
+// tap on a deal → 3 pages, one tap each: GIFT (picture, price, floors, rarity, supply) → SALES (history of this
+// model + backdrop on every marketplace) → ON SALE (the same gifts on sale now, by price, with this lot in place) → back.
+// Up / down scroll the lists, 2× tap — straight back to the feed, hold — send to Telegram.
+type Sale = { at: number; market: string; cur: 'STARS' | 'GRAM'; price: number; usd: number | null; num: number | null; mine: boolean; pattern?: string | null }
+type Hist = { items: Sale[]; week: number; total: number; usual_usd: number | null
+  top: { usd: number | null; cur: string; price: number; at: number } | null; top_stars: { price: number; usd: number; at: number } | null }
+type Lot = { market: string; num: number | null; pattern?: string | null; cur: 'STARS' | 'GRAM'; price: number; usd: number; listed_at?: number }
+type Floor = { market: string; cur: 'STARS' | 'GRAM'; price: number } | null
+type Full = { floor_col: Floor; floor_model: Floor; issued: number | null; supply: number | null; n_model: number | null
+  n_combo: number | null; history: Hist; on_sale: Lot[]; on_sale_wait: boolean }
+const fullCache = new Map<string, { at: number; v: Full | 'loading' | 'error' }>()
+const PAGES = ['GIFT', 'SALES', 'ON SALE']
+let fpage = 0, fscroll = 0
+const ROWS = 7
 
-async function loadHistory(d: Deal) {
+async function loadFull(d: Deal) {
   const k = d.id
-  const have = histCache.get(k)
+  const have = fullCache.get(k)
   if (have && have.v !== 'error' && (have.v === 'loading' || Date.now() - have.at < 60_000)) return
-  histCache.set(k, { at: Date.now(), v: 'loading' })
+  fullCache.set(k, { at: Date.now(), v: have && have.v !== 'loading' && have.v !== 'error' ? have.v : 'loading' })
+  const q = new URLSearchParams({ c: d.title, m: d.model, b: d.backdrop, slug: d.id, stars: String(d.stars || ''),
+    mr: d.mr || '', br: d.br || '' })
   try {
-    const r = await fetch(`${API}/history?c=${encodeURIComponent(d.title)}&m=${encodeURIComponent(d.model)}&b=${encodeURIComponent(d.backdrop)}&slug=${encodeURIComponent(d.id)}`)
-    histCache.set(k, { at: Date.now(), v: r.ok ? await r.json() as Hist : 'error' })
-  } catch { histCache.set(k, { at: Date.now(), v: 'error' }) }
+    const r = await fetch(`${API}/full?${q}`)
+    fullCache.set(k, { at: Date.now(), v: r.ok ? await r.json() as Full : 'error' })
+  } catch { fullCache.set(k, { at: Date.now(), v: 'error' }) }
   if (view === 'history' && deals[idx]?.id === d.id) paint()
 }
 
@@ -503,56 +518,187 @@ function when(ts: number) {
   if (t.toDateString() === y.toDateString()) return `yesterday ${hm}`
   return `${pad2(t.getDate())}.${pad2(t.getMonth() + 1)}${t.getFullYear() !== now.getFullYear() ? '.' + String(t.getFullYear()).slice(2) : ''} ${hm}`
 }
+const day = (ts: number) => { const t = new Date(ts * 1000); return `${pad2(t.getDate())}.${pad2(t.getMonth() + 1)}.${String(t.getFullYear()).slice(2)}` }
 const histPrice = (cur: string, p: number) => (cur === 'STARS' ? `${num(p)} ★` : `${p < 100 ? +p.toFixed(2) : Math.round(p)} GRAM`)
+const floorText = (f: Floor) => (f ? `↓ ${histPrice(f.cur, f.price)} · ${MARKET[f.market] || f.market}` : '')
+function age(ts?: number) {
+  if (!ts) return '—'
+  const s = Math.max(0, Date.now() / 1000 - ts)
+  if (s > 60 * 86400) return '—'                 // the marketplace's date is only a guess that old
+  return s < 3600 ? `${Math.max(1, Math.round(s / 60))} min` : s < 86400 ? `${Math.round(s / 3600)} h` : `${Math.round(s / 86400)} d`
+}
 
-function drawHistory(ctx: CanvasRenderingContext2D, d: Deal, h: Hist | 'loading' | 'error' | undefined) {
-  ctx.font = `500 13px ${FONT}`
-  header(ctx, fit(ctx, `${d.title} #${d.num} · ${d.model} · ${d.backdrop}`, W - 140))
+// the page tabs in the header: GIFT · SALES · ON SALE, the current one inverted
+function fullHeader(ctx: CanvasRenderingContext2D, d: Deal) {
   ctx.textBaseline = 'alphabetic'
-  ctx.font = `700 15px ${FONT}`; ctx.fillStyle = C.text; ctx.fillText('SALES HISTORY', 12, 56)
-  if (!h || h === 'loading' || h === 'error') {
-    ctx.font = `600 18px ${FONT}`; ctx.fillStyle = C.text
-    ctx.fillText(h === 'error' ? 'No connection to the sales data' : 'Loading sales…', 12, 130)
-    return
+  ctx.fillStyle = C.text; ctx.font = `800 17px ${FONT}`; ctx.fillText('TELEGIFT', 10, 23)
+  let x = W - 12
+  ctx.font = `700 12px ${FONT}`
+  for (let i = PAGES.length - 1; i >= 0; i--) {
+    const t = PAGES[i], w = ctx.measureText(t).width + 16
+    x -= w
+    if (i === fpage) { rrect(ctx, x, 8, w, 20, 10); ctx.fillStyle = '#fff'; ctx.fill(); ctx.fillStyle = '#000' }
+    else ctx.fillStyle = C.dim
+    ctx.fillText(t, x + 8, 22)
+    x -= 6
   }
-  // the summary: usual price, the top sale, how lively the market is
-  const sum: string[] = []
-  if (d.usd) sum.push(`this lot $${money(d.usd)}`)
-  if (h.usual_usd) sum.push(`usual $${money(h.usual_usd)}`)
-  if (h.top && h.top.usd) sum.push(`top $${money(h.top.usd)}`)
-  sum.push(`${h.week} this week`)
-  ctx.font = `700 13px ${FONT}`; ctx.fillStyle = C.text
-  const st = sum.join('  ·  '), sw = ctx.measureText(st).width
-  ctx.fillText(st, W - 12 - sw, 56)
-  ctx.fillStyle = C.line; ctx.fillRect(10, 66, W - 20, 1)
+  ctx.font = `600 13px ${FONT}`; ctx.fillStyle = C.dim
+  ctx.fillText(fit(ctx, `${d.title} #${d.num}`, x - 120), 112, 23)
+  ctx.fillStyle = C.line; ctx.fillRect(10, 33, W - 20, 1)
+}
+
+function loadingText(ctx: CanvasRenderingContext2D, v: unknown) {
+  ctx.font = `600 18px ${FONT}`; ctx.fillStyle = C.text
+  ctx.fillText(v === 'error' ? 'No connection to the data' : 'Loading…', 250, 130)
+}
+
+// page 1 — GIFT: big (animated) model, price, floors, rarity and how many such gifts exist
+function drawInfo(ctx: CanvasRenderingContext2D, d: Deal, f: Full | 'loading' | 'error' | undefined, pic: HTMLCanvasElement | null) {
+  fullHeader(ctx, d)
+  if (pic) ctx.drawImage(pic, 6, 38)
+  const x = 236, mw = W - x - 12
+  ctx.fillStyle = C.text
+  titleLine(ctx, d, x, 62, mw, `800 22px ${FONT}`, `800 20px ${FONT}`)
+  ctx.font = `800 21px ${FONT}`; ctx.fillStyle = '#fff'
+  const pt = priceText(d); ctx.fillText(pt, x, 90)
+  let px = x + ctx.measureText(pt).width + 10
+  ctx.font = `600 14px ${FONT}`; ctx.fillStyle = C.dim
+  const alt = [usd(d.usd), d.cur === 'STARS' && d.usd ? '' : ''].filter(Boolean).join(' ')
+  ctx.fillText(fit(ctx, alt, W - px - 12), px, 90)
+  const F = f && f !== 'loading' && f !== 'error' ? f : null
+  // collection line: floor of the whole collection + supply
+  ctx.font = `600 13px ${FONT}`; ctx.fillStyle = C.dim
+  const col = [F?.floor_col ? `collection ${floorText(F.floor_col)}` : 'collection …',
+    F?.issued ? `${num(F.issued)}${F.supply ? ' / ' + num(F.supply) : ''}` : ''].filter(Boolean).join('   ')
+  ctx.fillText(fit(ctx, col, mw), x, 112)
+  // attributes: name, rarity, how many exist, floor of the model
+  const rows: [string, string, string, string][] = [
+    ['Model', d.model, d.mr || '', [F?.n_model ? `${num(F.n_model)} pcs` : '', F?.floor_model ? floorText(F.floor_model) : ''].filter(Boolean).join('  ')],
+    ['Backdrop', d.backdrop, d.br || '', F?.n_combo ? `${num(F.n_combo)} pcs with this model` : ''],
+    ['Pattern', d.pattern || '—', d.pr || '', ''],
+  ]
+  let y = 140
+  for (const [k, v, r, extra] of rows) {
+    ctx.font = `500 13px ${FONT}`; ctx.fillStyle = C.dim; ctx.fillText(k, x, y)
+    ctx.font = `700 15px ${FONT}`; ctx.fillStyle = C.text
+    const vv = fit(ctx, v, 150); ctx.fillText(vv, x + 66, y)
+    let ax = x + 66 + ctx.measureText(vv).width + 6
+    ctx.font = `600 12px ${FONT}`; ctx.fillStyle = C.dim
+    if (r) { ctx.fillText(r, ax, y); ax += ctx.measureText(r).width + 10 }
+    if (extra) { ctx.font = `700 12px ${FONT}`; ctx.fillStyle = C.text; ctx.fillText(fit(ctx, extra, W - ax - 12), ax, y) }
+    y += 24
+  }
+  // the verdict line
+  const below = d.fair && d.stars && d.stars < d.fair ? Math.round((1 - d.stars / d.fair) * 100) : 0
+  const v: string[] = [`↗ ${xs(d.x)}× vs top sale`]
+  if (below >= 5) v.push(`${below}% below market`)
+  if (F) {
+    const cheaper = F.on_sale.filter((l) => d.usd && l.usd < d.usd).length
+    v.push(cheaper ? `${cheaper} cheaper on sale` : 'cheapest on sale')
+  }
+  ctx.font = `700 14px ${FONT}`; ctx.fillStyle = C.text
+  ctx.fillText(fit(ctx, v.join('  ·  '), mw), x, 236)
+}
+
+// page 2 — SALES: the "Maximum" and "Sales" tiles, then the table (this gift's own sales highlighted)
+function drawSales(ctx: CanvasRenderingContext2D, d: Deal, f: Full | 'loading' | 'error' | undefined) {
+  fullHeader(ctx, d)
+  if (!f || f === 'loading' || f === 'error') { loadingText(ctx, f); return }
+  const h = f.history
+  ctx.textBaseline = 'alphabetic'
+  // tiles
+  ctx.strokeStyle = C.line; ctx.lineWidth = 1
+  rrect(ctx, 10.5, 40.5, 300, 40, 8); ctx.stroke()
+  rrect(ctx, 318.5, 40.5, 120, 40, 8); ctx.stroke()
+  rrect(ctx, 446.5, 40.5, W - 457, 40, 8); ctx.stroke()
+  ctx.font = `600 11px ${FONT}`; ctx.fillStyle = C.dim
+  ctx.fillText('MAXIMUM', 20, 55); ctx.fillText('SALES', 328, 55); ctx.fillText('THIS LOT', 456, 55)
+  if (h.top) {
+    ctx.font = `800 17px ${FONT}`; ctx.fillStyle = '#fff'
+    const t = histPrice(h.top.cur, h.top.price); ctx.fillText(t, 20, 74)
+    let tx = 20 + ctx.measureText(t).width + 8
+    ctx.font = `600 12px ${FONT}`; ctx.fillStyle = C.dim
+    const sub = `${h.top.usd ? '≈$' + money(h.top.usd) + ' · ' : ''}${day(h.top.at)}` +
+      (h.top.cur !== 'STARS' && h.top_stars ? `   for ★ ${num(h.top_stars.price)}` : '')
+    ctx.fillText(fit(ctx, sub, 300 - tx), tx, 74)
+  }
+  ctx.font = `800 17px ${FONT}`; ctx.fillStyle = '#fff'; ctx.fillText(num(h.total), 328, 74)
+  ctx.font = `600 12px ${FONT}`; ctx.fillStyle = C.dim
+  ctx.fillText(`${h.week}/wk`, 328 + ctx.measureText(num(h.total)).width * 1.45 + 8, 74)
+  ctx.font = `800 17px ${FONT}`; ctx.fillStyle = '#fff'; ctx.fillText(d.usd ? `$${money(d.usd)}` : '—', 456, 74)
   if (!h.items.length) {
     ctx.font = `600 16px ${FONT}`; ctx.fillStyle = C.text
-    ctx.fillText('No sales of this model + backdrop in 90 days', 12, 120)
-    ctx.font = `500 13px ${FONT}`; ctx.fillStyle = C.dim
-    ctx.fillText('A rare combination — the price is up to the seller.', 12, 144)
+    ctx.fillText('No sales of this model + backdrop yet — a rare combination', 12, 130)
     return
   }
-  let y = 88
-  for (const it of h.items.slice(0, 7)) {
+  fscroll = Math.max(0, Math.min(fscroll, h.items.length - ROWS))
+  let y = 104
+  for (const it of h.items.slice(fscroll, fscroll + ROWS)) {
     ctx.font = `500 13px ${FONT}`; ctx.fillStyle = C.dim; ctx.fillText(when(it.at), 12, y)
-    ctx.font = `800 15px ${FONT}`; ctx.fillStyle = C.text; ctx.fillText(histPrice(it.cur, it.price), 150, y)
-    ctx.font = `500 13px ${FONT}`; ctx.fillStyle = C.dim
-    if (it.usd) ctx.fillText(`$${money(it.usd)}`, 272, y)
-    // sold 20 %+ above this deal's price → shown bright: a resale at that level would be a profit
-    if (it.usd && d.usd && it.usd > d.usd * 1.2) {
-      ctx.font = `700 13px ${FONT}`; ctx.fillStyle = C.text; ctx.fillText(`+${Math.round((it.usd / d.usd - 1) * 100)}%`, 330, y)
-    }
-    ctx.font = `600 13px ${FONT}`; ctx.fillStyle = C.text; ctx.fillText(MARKET[it.market] || it.market, 392, y)
+    ctx.font = `800 15px ${FONT}`; ctx.fillStyle = it.usd && d.usd && it.usd > d.usd * 1.2 ? '#fff' : C.text
+    ctx.fillText(histPrice(it.cur, it.price), 140, y)
+    ctx.font = `500 12px ${FONT}`; ctx.fillStyle = C.dim
+    if (it.usd) ctx.fillText(`$${money(it.usd)}`, 250, y)
+    if (it.usd && d.usd && it.usd > d.usd * 1.2) { ctx.font = `700 12px ${FONT}`; ctx.fillStyle = '#fff'; ctx.fillText(`+${Math.round((it.usd / d.usd - 1) * 100)}%`, 300, y) }
+    ctx.font = `600 12px ${FONT}`; ctx.fillStyle = C.text; ctx.fillText(MARKET[it.market] || it.market, 350, y)
     if (it.num) {
-      const t = it.mine ? `this #${it.num}` : `#${it.num}`
+      const t = `#${it.num}`
       ctx.font = `600 13px ${FONT}`
       const tw = ctx.measureText(t).width
-      if (it.mine) { rrect(ctx, W - 16 - tw - 6, y - 13, tw + 12, 18, 9); ctx.fillStyle = '#fff'; ctx.fill(); ctx.fillStyle = '#000' }
+      if (it.mine) { rrect(ctx, 424, y - 13, tw + 12, 18, 9); ctx.fillStyle = '#fff'; ctx.fill(); ctx.fillStyle = '#000' }
       else ctx.fillStyle = C.dim
-      ctx.fillText(t, W - 16 - tw, y)
+      ctx.fillText(t, 430, y)
     }
+    ctx.font = `500 12px ${FONT}`; ctx.fillStyle = C.dim
+    if (it.pattern) ctx.fillText(fit(ctx, it.pattern, W - 506 - 10), 506, y)
+    y += 21.5
+  }
+  scrollBar(ctx, fscroll, h.items.length, 92, 246)
+}
+
+function scrollBar(ctx: CanvasRenderingContext2D, from: number, total: number, y0: number, y1: number) {
+  if (total <= ROWS) return
+  const h = Math.max(14, ((y1 - y0) * ROWS) / total), y = y0 + ((y1 - y0 - h) * from) / Math.max(1, total - ROWS)
+  ctx.fillStyle = C.line; ctx.fillRect(W - 4, y0, 2, y1 - y0)
+  ctx.fillStyle = '#fff'; ctx.fillRect(W - 5, y, 4, h)
+}
+
+// page 3 — ON SALE: the same model + backdrop on every marketplace, by price in $, with this lot in its place
+function drawOnSale(ctx: CanvasRenderingContext2D, d: Deal, f: Full | 'loading' | 'error' | undefined) {
+  fullHeader(ctx, d)
+  if (!f || f === 'loading' || f === 'error') { loadingText(ctx, f); return }
+  ctx.textBaseline = 'alphabetic'
+  const lots = f.on_sale
+  const cheaper = lots.filter((l) => d.usd && l.usd < d.usd).length
+  const by = new Map<string, number>()
+  for (const l of lots) by.set(l.market, (by.get(l.market) || 0) + 1)
+  ctx.font = `700 15px ${FONT}`; ctx.fillStyle = C.text
+  ctx.fillText(cheaper ? `${cheaper} sold cheaper than this lot` : 'This lot is the cheapest', 12, 56)
+  ctx.font = `500 12px ${FONT}`; ctx.fillStyle = C.dim
+  const cnt = [...by].map(([m, n]) => `${MARKET[m] || m} ${n}`).join(' · ') || (f.on_sale_wait ? 'still asking the marketplaces…' : 'nobody else sells it now')
+  ctx.fillText(fit(ctx, `${d.model} · ${d.backdrop}   ${cnt}`, W - 270), 262, 56)
+  ctx.fillStyle = C.line; ctx.fillRect(10, 66, W - 20, 1)
+  // rows, with "this lot" inserted at its place by price
+  type Row = Lot & { me?: boolean }
+  const rows: Row[] = lots.map((l) => ({ ...l }))
+  if (d.usd) rows.splice(cheaper, 0, { market: d.market, num: d.num, pattern: d.pattern, cur: d.cur, price: d.price, usd: d.usd, me: true })
+  fscroll = Math.max(0, Math.min(fscroll, rows.length - ROWS))
+  let y = 88
+  for (const l of rows.slice(fscroll, fscroll + ROWS)) {
+    if (l.me) { rrect(ctx, 6, y - 16, W - 14, 22, 6); ctx.fillStyle = '#fff'; ctx.fill() }
+    const ink = l.me ? '#000' : C.text, dim = l.me ? '#000' : C.dim
+    ctx.font = `700 12px ${FONT}`; ctx.fillStyle = ink; ctx.fillText(MARKET[l.market] || l.market, 14, y)
+    ctx.font = `600 13px ${FONT}`; ctx.fillStyle = dim; ctx.fillText(l.me ? `this #${l.num}` : `#${l.num ?? '—'}`, 100, y)
+    ctx.font = `500 12px ${FONT}`; ctx.fillText(fit(ctx, l.pattern || '', 120), 210, y)
+    ctx.fillText(l.me ? 'now' : age(l.listed_at), 340, y)
+    ctx.font = `800 15px ${FONT}`; ctx.fillStyle = l.me ? '#000' : '#fff'
+    const pt = histPrice(l.cur, l.price), pw = ctx.measureText(pt).width
+    ctx.fillText(pt, 490 - pw, y)
+    ctx.font = `500 12px ${FONT}`; ctx.fillStyle = dim; ctx.fillText(`$${money(l.usd)}`, 500, y)
     y += 23
   }
+  if (!rows.length) { ctx.font = `600 15px ${FONT}`; ctx.fillStyle = C.text; ctx.fillText('No other lots of this model + backdrop on sale', 12, 110) }
+  scrollBar(ctx, fscroll, rows.length, 74, 246)
 }
 
 async function loadDetail(d: Deal) {
@@ -828,14 +974,25 @@ function paint() {
       return c
     })
     if (!d.sold) playModel(d)
-    put(5, 'foot', tip || (d.sold ? 'tap: next deal' : `tap: sales    ${token ? 'hold: send' : 'hold: link Telegram'}    2× tap: next`), tip ? 4 : 1)
+    put(5, 'foot', tip || (d.sold ? 'tap: next deal' : `tap: full info    ${token ? 'hold: send' : 'hold: link Telegram'}    2× tap: next`), tip ? 4 : 1)
     return
   }
   if (view === 'history') {
-    const h = histCache.get(d.id)
-    loadHistory(d)
-    show(async () => { const { c, ctx } = blank(); drawHistory(ctx, d, h?.v); return c })
-    put(5, 'foot', tip || `tap: back    ${token ? 'hold: send' : 'hold: link Telegram'}    2× tap: next`, tip ? 4 : 1)
+    const f = fullCache.get(d.id)
+    loadFull(d)
+    const page = fpage
+    show(async () => {
+      const { c, ctx } = blank()
+      if (page === 0) {
+        const frames = animId === d.id && animStep >= 0 ? await modelFrames(d.id) : null
+        drawInfo(ctx, d, f?.v, frames ? frames[animStep] : restFrame.get(d.id) || await modelPicture(d.title, d.model, GLANCE_PX))
+      } else if (page === 1) drawSales(ctx, d, f?.v)
+      else drawOnSale(ctx, d, f?.v)
+      return c
+    })
+    if (page === 0 && !d.sold) playModel(d)
+    const nextT = page < PAGES.length - 1 ? `tap: ${PAGES[page + 1].toLowerCase()}` : 'tap: back to feed'
+    put(5, 'foot', tip || `${nextT}    ${page ? 'swipe: scroll    ' : ''}2× tap: feed    ${token ? 'hold: send' : 'hold: link'}`, tip ? 4 : 1)
     return
   }
   if (view === 'detail') {
@@ -1002,6 +1159,7 @@ bridge.onEvenHubEvent((event) => {
     return
   }
   if (is(OsEventTypeList.DOUBLE_CLICK_EVENT)) {          // double tap: next deal (wraps to the freshest); no deals — exit
+    if (view === 'history') { view = 'glance'; paint(); return }       // in the full info: straight back to the feed
     if (mode === 'deals' && deals.length) {
       view = 'glance'; idx = idx < deals.length - 1 ? idx + 1 : 0; if (idx === 0) fresh = 0; paint(); return
     }
@@ -1009,6 +1167,9 @@ bridge.onEvenHubEvent((event) => {
   }
   if (view === 'detail' && (is(OsEventTypeList.SCROLL_BOTTOM_EVENT) || is(OsEventTypeList.SCROLL_TOP_EVENT))) {
     view = 'card'; paint(); return
+  }
+  if (view === 'history' && fpage > 0 && (is(OsEventTypeList.SCROLL_BOTTOM_EVENT) || is(OsEventTypeList.SCROLL_TOP_EVENT))) {
+    fscroll = Math.max(0, fscroll + (is(OsEventTypeList.SCROLL_BOTTOM_EVENT) ? 3 : -3)); paint(); return
   }
   if (is(OsEventTypeList.SCROLL_BOTTOM_EVENT) && mode === 'deals' && deals.length) {
     idx = Math.min(deals.length - 1, idx + 1); paint(); return
@@ -1022,8 +1183,10 @@ bridge.onEvenHubEvent((event) => {
     if (mode === 'deals' && deals.length) {          // tap: the deal <-> its sales history (back to the same deal)
       const d = deals[Math.min(idx, deals.length - 1)]
       if (d.sold && view === 'glance') { idx = idx < deals.length - 1 ? idx + 1 : 0; paint(); return }
-      view = view === 'history' ? 'glance' : 'history'
-      if (view === 'history') loadHistory(d)
+      if (view === 'history') {                      // next page; after the last one — back to the feed
+        fpage++; fscroll = 0
+        if (fpage >= PAGES.length) view = 'glance'
+      } else { view = 'history'; fpage = 0; fscroll = 0; loadFull(d) }
       paint(); return
     }
   }
