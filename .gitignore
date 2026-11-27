@@ -11,3 +11,5 @@ cloudflared.log
 backend/cache/
 backend/watches.json
 backend/watches.json.tmp
+backend/settings.json
+backend/settings.json.tmp

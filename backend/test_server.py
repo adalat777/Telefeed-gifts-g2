@@ -19,6 +19,7 @@ import server  # noqa: E402
 
 server.PAIRS = os.path.join(TMP, "pairs.json")
 server.WATCHES = os.path.join(TMP, "watches.json")
+server.SETTINGS = os.path.join(TMP, "settings.json")
 server.IMG_CACHE = os.path.join(TMP, "cache")
 server.TELEFEED_IMG = os.path.join(TMP, "models")
 server.TELEFEED_GIFTS = os.path.join(TMP, "gifts")
@@ -90,6 +91,7 @@ class Base(unittest.TestCase):
         server._detail_cache.clear()
         server._pairs.clear()
         server._watches.clear()
+        server._settings.clear()
         server._last_send.clear()
         self.tg = FakeTelegram()
         server.tg = self.tg
@@ -235,6 +237,38 @@ class WatchTest(Base):
         server.on_button({"id": "cb", "data": f"chart:{item['id']}", "message": {"chat": {"id": 7}}})
         sent = [p for m, p in self.tg.calls if m == "sendMessage"][0]
         self.assertIn("last 30 days", sent["text"])
+
+
+class SettingsTest(Base):
+    def test_glasses_show_only_what_matches_the_settings(self):
+        server._pairs["tok"] = 9
+        everything = server.signals(50, 60)["items"]
+        self.assertEqual(len(everything), 2)
+        server.change_setting(9, "min", "5")                       # only deals with resell profit ≥ $5
+        st = server.settings_of(9)
+        self.assertEqual([i["id"] for i in everything if server.matches(st, i)], ["MirageLamp-35247"])
+        server.change_setting(9, "mk", "telegram")                 # untick Telegram → nothing from Telegram
+        self.assertFalse(server.matches(server.settings_of(9), everything[0]))
+        server.change_setting(9, "mk", "telegram")                 # tick it back → all markets again
+        self.assertIsNone(server.settings_of(9)["markets"])
+        server.change_setting(9, "cols", ["Plush Pepe"])
+        self.assertFalse(server.matches(server.settings_of(9), everything[0]))
+
+    def test_quiet_hours_across_midnight(self):
+        st = {"quiet": [23, 8]}
+        at = lambda h: time.mktime((2026, 11, 27, h, 30, 0, 0, 0, -1))  # noqa: E731
+        self.assertTrue(server.is_quiet(st, at(2)))
+        self.assertTrue(server.is_quiet(st, at(23)))
+        self.assertFalse(server.is_quiet(st, at(12)))
+        self.assertFalse(server.is_quiet({"quiet": None}, at(2)))
+
+    def test_settings_buttons_and_command(self):
+        server.on_button({"id": "c", "data": "set:min:10", "message": {"chat": {"id": 5}, "message_id": 1}})
+        self.assertEqual(server.settings_of(5)["min"], 10)
+        method, p = [c for c in self.tg.calls if c[0] == "editMessageText"][-1]
+        self.assertIn("$10", p["text"])
+        kb = [b["text"] for row in p["reply_markup"]["inline_keyboard"] for b in row]
+        self.assertIn("✓ $10+", kb)
 
 
 if __name__ == "__main__":

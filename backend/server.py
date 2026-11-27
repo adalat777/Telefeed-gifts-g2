@@ -1,7 +1,8 @@
 """TeleGift Glance backend — Telegram Gifts deals for Even Realities G2.
 
 Small stdlib-only HTTP server (no dependencies):
-  GET  /signals?limit=20&minutes=60   fresh underpriced gift listings (read-only, from the TeleFeed database)
+  GET  /signals?limit=20&minutes=60[&token=]  fresh underpriced gift listings (read-only, from the TeleFeed database);
+                                       with a pairing token — only deals that match the user's /settings in the bot
   POST /pair                           start pairing: returns a 6-digit code to send to the Telegram bot
   GET  /pair/<code>                    poll: {"paired": true, "token": "..."} once the code was sent to the bot
   POST /send {"token", "item"}         the bot sends this deal to the paired Telegram chat (link + "Open gift" button)
@@ -82,6 +83,94 @@ def save_pairs():
     os.replace(PAIRS + ".tmp", PAIRS)
 
 
+SETTINGS = os.path.join(HERE, "settings.json")   # chat -> {"min": $, "markets": [...] | None, "cols": [...] | None, "quiet": [h1, h2] | None}
+_settings = {}
+try:
+    _settings.update(json.load(open(SETTINGS)))
+except (OSError, ValueError):
+    pass
+MIN_STEPS = [0, 2, 5, 10, 25, 50]
+QUIET_STEPS = [None, [23, 8], [0, 8], [22, 9]]
+ALL_MARKETS = ["telegram", "mrkt", "portals", "tonnel", "onchain"]
+
+
+def save_settings():
+    with open(SETTINGS + ".tmp", "w") as f:
+        json.dump(_settings, f)
+    os.replace(SETTINGS + ".tmp", SETTINGS)
+
+
+def settings_of(chat):
+    st = {"min": 0, "markets": None, "cols": None, "quiet": None}
+    st.update(_settings.get(str(chat)) or {})
+    return st
+
+
+def is_quiet(st, now=None):
+    q = st.get("quiet")
+    if not q:
+        return False
+    h = time.localtime(now or time.time()).tm_hour
+    a, b = q
+    return a <= h < b if a < b else (h >= a or h < b)
+
+
+def matches(st, it):
+    if st.get("markets") and (it.get("market") or "telegram") not in st["markets"]:
+        return False
+    if st.get("cols") and (it.get("title") or "").lower() not in [c.lower() for c in st["cols"]]:
+        return False
+    if st.get("min"):
+        rs = it.get("resell") or {}
+        if (rs.get("profit_usd") or 0) < st["min"]:
+            return False
+    return True
+
+
+def settings_text(st):
+    mk = "all" if not st.get("markets") else ", ".join(MARKET.get(m, m) for m in st["markets"])
+    cols = "all" if not st.get("cols") else ", ".join(st["cols"])
+    q = "off" if not st.get("quiet") else f"{st['quiet'][0]:02d}:00–{st['quiet'][1]:02d}:00"
+    return ("⚙️ What your glasses show\n\n"
+            f"• Minimum resell profit: {'any' if not st.get('min') else '$' + str(st['min'])}\n"
+            f"• Marketplaces: {mk}\n"
+            f"• Collections: {cols}\n"
+            f"• Quiet hours (no pop-ups): {q}\n\n"
+            "Collections: send /collections Plush Pepe, Mirage Lamp  (or /collections all)")
+
+
+def settings_keyboard(st):
+    rows = [[{"text": ("✓ " if (st.get("min") or 0) == v else "") + ("any $" if not v else f"${v}+"), "callback_data": f"set:min:{v}"}
+             for v in MIN_STEPS]]
+    mrow = []
+    for m in ALL_MARKETS:
+        on = not st.get("markets") or m in st["markets"]
+        mrow.append({"text": ("✓ " if on else "· ") + MARKET.get(m, m).split(" ")[0], "callback_data": f"set:mk:{m}"})
+    rows.append(mrow[:3]); rows.append(mrow[3:])
+    qn = str(st.get("quiet"))
+    rows.append([{"text": ("✓ " if str(q) == qn else "") + ("no quiet hours" if not q else f"quiet {q[0]}–{q[1]}"),
+                  "callback_data": "set:quiet:" + ("off" if not q else f"{q[0]}-{q[1]}")} for q in QUIET_STEPS])
+    return {"inline_keyboard": rows}
+
+
+def change_setting(chat, what, value):
+    st = settings_of(chat)
+    if what == "min":
+        st["min"] = int(value)
+    elif what == "mk":
+        cur = list(st.get("markets") or ALL_MARKETS)
+        cur = [m for m in cur if m != value] if value in cur else cur + [value]
+        st["markets"] = None if set(cur) >= set(ALL_MARKETS) or not cur else [m for m in ALL_MARKETS if m in cur]
+    elif what == "quiet":
+        st["quiet"] = None if value == "off" else [int(x) for x in value.split("-")]
+    elif what == "cols":
+        st["cols"] = value or None
+    with _lock:
+        _settings[str(chat)] = st
+        save_settings()
+    return st
+
+
 WATCHES = os.path.join(HERE, "watches.json")     # chat -> {gift id: {"stars", "ton", "title", "num", "at"}} (gitignored)
 _watches = {}
 _items = {}                                       # gift id -> last deal we sent (for the bot buttons)
@@ -138,6 +227,16 @@ def bot_loop():
                 text = (m.get("text") or "").strip()
                 if not chat or not text:
                     continue
+                if text.startswith("/settings"):
+                    st = settings_of(chat)
+                    tg("sendMessage", {"chat_id": chat, "text": settings_text(st), "reply_markup": settings_keyboard(st)}, 15)
+                    continue
+                if text.startswith("/collections"):
+                    arg = text[len("/collections"):].strip()
+                    cols = [] if not arg or arg.lower() == "all" else [c.strip() for c in arg.split(",") if c.strip()][:20]
+                    st = change_setting(chat, "cols", cols)
+                    tg("sendMessage", {"chat_id": chat, "text": settings_text(st), "reply_markup": settings_keyboard(st)}, 15)
+                    continue
                 code = re.sub(r"\D", "", text.replace("/start", ""))
                 with _lock:
                     p = _pending.get(code) if len(code) == 6 else None
@@ -150,7 +249,8 @@ def bot_loop():
                     else:
                         ok = False
                 if ok:
-                    tg("sendMessage", {"chat_id": chat, "text": "✅ Paired with your G2 glasses.\nTap a deal on the glasses — it lands here with a link to buy."}, 15)
+                    tg("sendMessage", {"chat_id": chat, "text": "✅ Paired with your G2 glasses.\nTap a deal on the glasses — it lands here with a link to buy.\n\n"
+                                                             "Choose what the glasses show: /settings"}, 15)
                 else:
                     tg("sendMessage", {"chat_id": chat, "text": "👓 TeleGift Glance\nOpen the app on your Even G2 and send me the 6-digit code it shows."}, 15)
         except Exception:
@@ -258,6 +358,17 @@ def add_watch(chat, it):
 def on_button(cb):
     chat = ((cb.get("message") or {}).get("chat") or {}).get("id")
     kind, _, gid = (cb.get("data") or "").partition(":")
+    if kind == "set" and chat:
+        what, _, value = gid.partition(":")
+        try:
+            st = change_setting(chat, what, value)
+            m = cb.get("message") or {}
+            tg("editMessageText", {"chat_id": chat, "message_id": m.get("message_id"), "text": settings_text(st),
+                                   "reply_markup": settings_keyboard(st)}, 15)
+            tg("answerCallbackQuery", {"callback_query_id": cb["id"], "text": "Saved"}, 15)
+        except Exception:
+            pass
+        return
     it = _items.get(gid)
     note = ""
     try:
@@ -549,7 +660,12 @@ class H(BaseHTTPRequestHandler):
             try:
                 limit = max(1, min(50, int(q.get("limit", ["20"])[0])))
                 minutes = max(1, min(1440, int(q.get("minutes", ["60"])[0])))
-                return self._send(200, signals(limit, minutes))
+                out = signals(50, minutes)
+                chat = _pairs.get((q.get("token") or [""])[0])
+                st = settings_of(chat) if chat else None
+                items = [i for i in out["items"] if not st or matches(st, i)][:limit]
+                return self._send(200, dict(out, items=items, quiet=bool(st and is_quiet(st)),
+                                            filtered=bool(st and (st.get("min") or st.get("markets") or st.get("cols")))))
             except (ValueError, sqlite3.Error) as e:
                 return self._send(503, {"error": type(e).__name__})
         if u.path == "/detail":
@@ -672,6 +788,11 @@ class H(BaseHTTPRequestHandler):
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", "8090"))
     if BOT:
+        try:
+            tg("setMyCommands", {"commands": [{"command": "settings", "description": "What the glasses show"},
+                                              {"command": "collections", "description": "Only these collections"}]}, 15)
+        except Exception:
+            pass
         threading.Thread(target=bot_loop, daemon=True).start()
         threading.Thread(target=watch_loop, daemon=True).start()
     print(f"TeleGift Glance backend on http://127.0.0.1:{port} · bot: {'@' + bot_name() if BOT else 'not configured'}")
