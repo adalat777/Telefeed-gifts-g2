@@ -20,6 +20,7 @@ type Deal = {
   price: number; cur: 'STARS' | 'GRAM'; usd: number | null; x: number; floor: number | null; cheapest?: boolean
   typical: number | null; max: number | null; sales: number | null; market: string; url: string | null; seen_s: number
   resell?: { sell: number; net: number; cost_usd: number; get_usd: number; profit_usd: number } | null
+  fair?: number | null; stars?: number | null; rs_pct?: number | null; rs_good?: boolean
   sold?: boolean
 }
 
@@ -586,9 +587,16 @@ function drawGlance(ctx: CanvasRenderingContext2D, d: Deal, pic: HTMLCanvasEleme
   const rs = d.resell && d.resell.profit_usd > 0.5 ? d.resell : null
   ctx.fillStyle = '#fff'; ctx.font = `800 62px ${FONT}`
   ctx.fillText(rs ? `+$${money(rs.profit_usd)}` : `↗ ${xs(d.x)}×`, x - 3, 104)
-  if (rs) {
-    ctx.font = `600 13px ${FONT}`; ctx.fillStyle = C.dim
-    ctx.fillText(`resell estimate · ↗ ${xs(d.x)}× vs top sale`, x, 124)
+  // the money line: what you would make on a resale, and how far below the usual price this lot is
+  const below = d.fair && d.stars && d.stars < d.fair ? Math.round((1 - d.stars / d.fair) * 100) : 0
+  const parts: string[] = []
+  if (rs) parts.push(`sell ~${num(rs.sell)} ★ → you +${Math.round((rs.profit_usd / Math.max(0.01, rs.cost_usd)) * 100)}%`)
+  if (below >= 5) parts.push(`${below}% below market`)
+  else if (d.fair && !rs) parts.push(`usual price ${num(d.fair)} ★`)
+  if (rs && !below) parts.push(`↗ ${xs(d.x)}× vs top sale`)
+  if (parts.length) {
+    ctx.font = `700 14px ${FONT}`; ctx.fillStyle = C.text
+    ctx.fillText(fit(ctx, parts.join('  ·  '), W - x - 12), x, 126)
   }
   ctx.fillStyle = C.text
   titleLine(ctx, d, x, 160, W - x - 12, `800 23px ${FONT}`, `800 21px ${FONT}`)
@@ -596,6 +604,16 @@ function drawGlance(ctx: CanvasRenderingContext2D, d: Deal, pic: HTMLCanvasEleme
   ctx.fillText(fit(ctx, `${d.model} · ${d.backdrop}`, W - x - 12), x, 184)
   ctx.font = `700 16px ${FONT}`; ctx.fillStyle = C.text
   ctx.fillText(fit(ctx, `${priceText(d)}  ${usd(d.usd)}  ·  ${ago(liveAge(d))}  ·  ${MARKET[d.market] || d.market}`, W - x - 12), x, 216)
+  // one quiet line of signals: competition and how such resales usually end
+  const sig: string[] = []
+  if (d.cheapest) sig.push('cheapest on sale')
+  else if (d.floor) sig.push(`on sale from ${num(d.floor)} ★`)
+  if (d.rs_good && d.rs_pct) sig.push(`★ ${Math.round(d.rs_pct * 100)}% of resales in profit`)
+  else if (d.sales) sig.push(`${num(d.sales)} sales`)
+  if (sig.length) {
+    ctx.font = `500 13px ${FONT}`; ctx.fillStyle = C.dim
+    ctx.fillText(fit(ctx, sig.join('  ·  '), W - x - 12), x, 242)
+  }
   if (d.sold) {
     ctx.fillStyle = '#000'; ctx.fillRect(0, 36, W, H - 36)
     ctx.save(); ctx.translate(W / 2, 120); ctx.rotate(-0.12)

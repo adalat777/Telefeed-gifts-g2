@@ -539,6 +539,11 @@ def signals(limit=20, minutes=60):
             "url": d.get("url") or (f"https://t.me/nft/{d['slug']}" if d.get("slug") else None),
             "seen_s": int(time.time() - last),
             "resell": resell(d, h, res, usd_rate),
+            # for the glance: the usual price (median of recent sales of this model + backdrop), price in Stars,
+            # and how often resales of such gifts end in profit after the fee
+            "fair": res.get("fair") or h.get("typical"), "stars": stars_now,
+            "rs_pct": (d.get("rstat") or {}).get("kw") or (d.get("rstat") or {}).get("cw"),
+            "rs_good": bool((d.get("rstat") or {}).get("good")),
         })
     out = {"now": int(time.time()), "items": items, "gone": gone}
     _cache[key] = (time.time(), out)
