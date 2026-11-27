@@ -17,7 +17,7 @@ TeleFeed (our data, read-only)            backend/server.py                 G2 g
                                           POST /send   ◄──  tap ──────────   send this deal
                                                │
                                                ▼
-                                   Telegram bot @telefeedgifts_ai
+                                   Telegram bot @telefeedgifts_ai_bot
                                    → message in YOUR chat with "🎁 Open gift"
 ```
 
@@ -26,7 +26,7 @@ TeleFeed (our data, read-only)            backend/server.py                 G2 g
   listing data: gift name, number, model, backdrop, price, marketplace, link.
 - **Write (one tap)** — the glasses ask the backend to send the deal; our bot posts it to the Telegram chat that was
   paired with these glasses, with an inline **Open gift** button (`t.me/nft/<gift>` or the marketplace's link).
-- **Pairing** — the glasses show a 6-digit code; you send it to [@telefeedgifts_ai](https://t.me/telefeedgifts_ai).
+- **Pairing** — the glasses show a 6-digit code; you send it to [@telefeedgifts_ai_bot](https://t.me/telefeedgifts_ai_bot).
   The app then gets an opaque token. The bot token and your chat id never reach the glasses.
 
 ### On the lens
@@ -59,7 +59,7 @@ while you are reading the full info or touched the glasses in the last 8 s). If 
 After hold: full-screen **✓ Sent to Telegram**. The lens goes dark after 10 min without touches and wakes on a tap or on a
 matching deal.
 
-### In Telegram (@telefeedgifts_ai)
+### In Telegram (@telefeedgifts_ai_bot)
 
 - The deal arrives as the **gift picture** with buttons **🎁 Open gift** (buy in two taps), **📈 Price chart**, **👁 Watch**.
 - **Watch** — the bot writes when the gift gets ≥3 % cheaper or is sold.

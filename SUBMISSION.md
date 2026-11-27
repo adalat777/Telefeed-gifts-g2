@@ -33,7 +33,7 @@ walking, or during a meeting.
    (`sell ~N ★ → you +X%`), how far below market, price in Stars or GRAM with dollars, marketplace and how fresh it is.
    Swipe up / down to flip deals. **Tap** opens the full info: GIFT (rarity, floors, how many exist), SALES (all sales of
    this model + backdrop from every marketplace, this gift's own sales highlighted) and ON SALE (the competition right now).
-4. **Write — one gesture:** **hold** — our Telegram bot @telefeedgifts_ai sends this deal to your own Telegram chat
+4. **Write — one gesture:** **hold** — our Telegram bot @telefeedgifts_ai_bot sends this deal to your own Telegram chat
    with the gift picture and buttons **Open gift**, **Price chart**, **Watch**. You buy in Telegram — two taps.
    **Double tap** — watch the lot: the bot writes when it gets cheaper or is sold.
 5. Pairing takes one step: the glasses show a 6-digit code, you send it to the bot. No logins and no passwords on the

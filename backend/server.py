@@ -232,7 +232,7 @@ def bot_name():
     return _bot_name or ""
 
 
-# 27.11 one bot for everything (@telefeedgifts_ai): Telegram gives a bot's updates to one program only, so this server
+# 27.11 one bot for everything (@telefeedgifts_ai_bot): Telegram gives a bot's updates to one program only, so this server
 # takes them all and hands TeleFeed what is its own — Stars payments and a plain /start (its welcome with the "Open
 # TeleFeed" button). On: RELAY_TO_TELEFEED=1 (on the server, where TeleFeed runs with BOT_POLL=0).
 RELAY = os.environ.get("RELAY_TO_TELEFEED") == "1"
@@ -249,7 +249,7 @@ def relay(u):
         return False
 
 
-# 27.11 inline mode (owner): in any chat "@telefeedgifts_ai plush pepe" → the freshest underpriced lots that match
+# 27.11 inline mode (owner): in any chat "@telefeedgifts_ai_bot plush pepe" → the freshest underpriced lots that match
 # (collection / model / backdrop / pattern / number), best "×" first; picking one sends the deal card with buttons.
 # Needs inline mode switched on for the bot in @BotFather (/setinline). Empty query — the best deals right now.
 INLINE_MAX = 20

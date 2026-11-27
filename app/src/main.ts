@@ -1138,7 +1138,7 @@ function paint() {
     const code = pairCode
     show(async () => {
       const { c, ctx } = blank()
-      if (code) drawMessage(ctx, 'link Telegram', 'Get deals in your Telegram', ['1.  Open @telefeedgifts_ai', '2.  Send this code:'], `${code.slice(0, 3)} ${code.slice(3)}`)
+      if (code) drawMessage(ctx, 'link Telegram', 'Get deals in your Telegram', ['1.  Open @telefeedgifts_ai_bot', '2.  Send this code:'], `${code.slice(0, 3)} ${code.slice(3)}`)
       else drawMessage(ctx, 'link Telegram', 'Connecting…', [])
       return c
     })
