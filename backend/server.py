@@ -232,13 +232,34 @@ def bot_name():
     return _bot_name or ""
 
 
+# 27.11 one bot for everything (@telefeedgifts_ai): Telegram gives a bot's updates to one program only, so this server
+# takes them all and hands TeleFeed what is its own — Stars payments and a plain /start (its welcome with the "Open
+# TeleFeed" button). On: RELAY_TO_TELEFEED=1 (on the server, where TeleFeed runs with BOT_POLL=0).
+RELAY = os.environ.get("RELAY_TO_TELEFEED") == "1"
+
+
+def relay(u):
+    """POST the update to TeleFeed on the same machine; True if TeleFeed took it."""
+    try:
+        req = urllib.request.Request(TELEFEED_API.rstrip("/") + "/api/bot-update", data=json.dumps(u).encode(),
+                                     headers={"Content-Type": "application/json"}, method="POST")
+        with urllib.request.urlopen(req, timeout=20) as r:
+            return bool(json.loads(r.read() or b"{}").get("ok"))
+    except Exception:
+        return False
+
+
 def bot_loop():
     offset = 0
+    kinds = ["message", "callback_query"] + (["pre_checkout_query"] if RELAY else [])
     while True:
         try:
-            res = tg("getUpdates", {"offset": offset, "timeout": 30, "allowed_updates": ["message", "callback_query"]}, timeout=40)
+            res = tg("getUpdates", {"offset": offset, "timeout": 30, "allowed_updates": kinds}, timeout=40)
             for u in res.get("result", []):
                 offset = u["update_id"] + 1
+                if RELAY and (u.get("pre_checkout_query") or (u.get("message") or {}).get("successful_payment")):
+                    relay(u)                              # payments are TeleFeed's
+                    continue
                 if u.get("callback_query"):
                     on_button(u["callback_query"])
                     continue
@@ -258,6 +279,8 @@ def bot_loop():
                     tg("sendMessage", {"chat_id": chat, "text": settings_text(st), "reply_markup": settings_keyboard(st)}, 15)
                     continue
                 code = re.sub(r"\D", "", text.replace("/start", ""))
+                if RELAY and text.startswith("/start") and len(code) != 6 and relay(u):
+                    continue                              # a plain /start: TeleFeed's welcome with the "Open" button
                 with _lock:
                     p = _pending.get(code) if len(code) == 6 else None
                     if p and time.time() - p["at"] < 600 and not p["token"]:
