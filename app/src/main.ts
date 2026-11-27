@@ -150,8 +150,8 @@ async function giftBackdrop(slug: string, w: number, h: number): Promise<HTMLCan
         const dist = Math.hypot(x - cxm, y - cym)
         const glow = 1 - 0.55 * (dist / rmax)                          // radial backdrop gradient, lighter in the middle
         e *= Math.min(1, Math.max(0, (dist - h * 0.42) / (h * 0.12)))  // no contours under our model (no ghost outline)
-        const v = (3 + 22 * t * glow) + 40 * e                          // lens: ~0–45 % brightness, symbols' edges brighter
-        d[i] = d[i + 1] = d[i + 2] = Math.min(70, v); d[i + 3] = 255
+        const v = (2 + 14 * t * glow) + 26 * e                          // lens: ~0–35 % brightness, symbols' edges brighter
+        d[i] = d[i + 1] = d[i + 2] = Math.min(44, v); d[i + 3] = 255
       }
       ctx.putImageData(img, 0, 0)
       out = c
