@@ -9,8 +9,13 @@
     {
       "name": "network",
       "desc": "Loads live underpriced Telegram Gift listings and sends a deal to your own Telegram chat via the TeleGift bot.",
-      "whitelist": ["http://localhost:8090"]
+      "whitelist": [
+        "http://localhost:8090",
+        "https://theta-they-organizations-medicare.trycloudflare.com"
+      ]
     }
   ],
-  "supported_languages": ["en"]
+  "supported_languages": [
+    "en"
+  ]
 }

@@ -56,6 +56,9 @@ npm run dev          # Vite on :5173
 npm run simulate     # Even Hub simulator
 ```
 
+Public demo backend (temporary Cloudflare quick tunnel, set in `app/.env.production` and the whitelist in
+`app/app.json`): https://theta-they-organizations-medicare.trycloudflare.com — `npm run build` / `npm run pack` use it.
+
 Real glasses: `npx evenhub qr --url http://<your-ip>:5173` and scan it in the Even Hub app. To use a remote backend,
 build with `VITE_API=https://<host>` and add the host to the `network` whitelist in `app/app.json`.
 
