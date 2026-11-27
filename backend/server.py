@@ -6,6 +6,7 @@ Small stdlib-only HTTP server (no dependencies):
   GET  /pair/<code>                    poll: {"paired": true, "token": "..."} once the code was sent to the bot
   POST /send {"token", "item"}         the bot sends this deal to the paired Telegram chat (link + "Open gift" button)
   GET  /model?c=<collection>&m=<model>  PNG of the gift model without background (cdn.changes.tg, cached on disk)
+  GET  /gift?slug=<slug>             the full gift picture (backdrop + pattern symbols + model) from Fragment, cached
   GET  /health
 
 Env:
@@ -172,6 +173,54 @@ def model_png(col, model):
         return None
 
 
+FRAGMENT_GIFT = "https://nft.fragment.com/gift/{}.webp"
+TELEFEED_GIFTS = os.path.normpath(os.path.join(HERE, "..", "..", "data", "gifts"))      # TeleFeed's own cache
+IMG_MAGIC = (b"\x89PNG", b"\xff\xd8\xff", b"RIFF", b"GIF8")
+
+
+def gift_picture(slug):
+    if not re.fullmatch(r"[A-Za-z0-9]+-\d{1,9}", slug or ""):
+        return None
+    own = os.path.join(TELEFEED_GIFTS, slug + ".img")
+    if os.path.exists(own):
+        data = open(own, "rb").read()
+        if data.startswith(IMG_MAGIC):
+            return data
+    path = os.path.join(IMG_CACHE, "gift_" + slug.lower() + ".img")
+    if os.path.exists(path):
+        return open(path, "rb").read()
+    miss = path + ".none"
+    if os.path.exists(miss) and time.time() - os.path.getmtime(miss) < 21600:
+        return None
+    with _img_lock:
+        try:
+            req = urllib.request.Request(FRAGMENT_GIFT.format(slug.lower()), headers={"User-Agent": "TeleGiftGlance/1.0"})
+            with urllib.request.urlopen(req, timeout=15, context=SSL) as r:
+                data = r.read(4_000_000)
+        except urllib.error.HTTPError as e:
+            data = None if e.code == 404 else b""
+        except Exception:
+            data = b""
+        os.makedirs(IMG_CACHE, exist_ok=True)
+        if data and data.startswith(IMG_MAGIC):
+            with open(path, "wb") as f:
+                f.write(data)
+            return data
+        if data is None:
+            open(miss, "w").close()
+        return None
+
+
+def image_type(data):
+    if data.startswith(b"\x89PNG"):
+        return "image/png"
+    if data.startswith(b"\xff\xd8\xff"):
+        return "image/jpeg"
+    if data.startswith(b"GIF8"):
+        return "image/gif"
+    return "image/webp"
+
+
 # ---------- signals (read-only) ----------
 def signals(limit=20, minutes=60):
     key = (limit, minutes)
@@ -263,6 +312,19 @@ class H(BaseHTTPRequestHandler):
                 return self._send(200, signals(limit, minutes))
             except (ValueError, sqlite3.Error) as e:
                 return self._send(503, {"error": type(e).__name__})
+        if u.path == "/gift":
+            slug = (urllib.parse.parse_qs(u.query).get("slug") or [""])[0][:80]
+            data = gift_picture(slug)
+            if not data:
+                return self._send(404, {"error": "no picture"})
+            self.send_response(200)
+            self.send_header("Content-Type", image_type(data))
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.send_header("Cache-Control", "max-age=86400")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+            return
         if u.path == "/model":
             q = urllib.parse.parse_qs(u.query)
             col, model = (q.get("c") or [""])[0][:64], (q.get("m") or [""])[0][:64]

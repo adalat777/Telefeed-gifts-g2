@@ -109,6 +109,59 @@ async function modelPicture(title: string, model: string, size: number): Promise
   return out
 }
 
+// ---------- gift backdrop + pattern symbols (from the full gift picture) ----------
+// Kept in the dark range so the model stays the brightest thing; contours make the pattern symbols readable.
+const backCache = new Map<string, HTMLCanvasElement | null>()
+
+async function giftBackdrop(slug: string, w: number, h: number): Promise<HTMLCanvasElement | null> {
+  const key = `${slug}|${w}x${h}`
+  if (backCache.has(key)) return backCache.get(key)!
+  let out: HTMLCanvasElement | null = null
+  try {
+    const r = await fetch(`${API}/gift?slug=${encodeURIComponent(slug)}`)
+    if (r.ok) {
+      const bmp = await createImageBitmap(await r.blob())
+      const c = document.createElement('canvas'); c.width = w; c.height = h
+      const ctx = c.getContext('2d')!
+      const k = Math.max(w / bmp.width, h / bmp.height)          // cover, centered
+      const dw = bmp.width * k, dh = bmp.height * k
+      ctx.drawImage(bmp, (w - dw) / 2, (h - dh) / 2, dw, dh)
+      const img = ctx.getImageData(0, 0, w, h)
+      const d = img.data, N = w * h
+      const lum = new Float32Array(N)
+      let mn = 255, mx = 0
+      for (let p = 0; p < N; p++) {
+        const i = p * 4
+        lum[p] = 0.3 * d[i] + 0.59 * d[i + 1] + 0.11 * d[i + 2]
+        if (lum[p] < mn) mn = lum[p]; if (lum[p] > mx) mx = lum[p]
+      }
+      const span = Math.max(12, mx - mn)
+      const cxm = w / 2, cym = h / 2, rmax = Math.hypot(cxm, cym)
+      for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+        const p = y * w + x, i = p * 4
+        const t = (lum[p] - mn) / span
+        let e = 0
+        if (x > 0 && y > 0 && x < w - 1 && y < h - 1) {
+          const L = lum
+          const gx = L[p - w + 1] + 2 * L[p + 1] + L[p + w + 1] - L[p - w - 1] - 2 * L[p - 1] - L[p + w - 1]
+          const gy = L[p + w - 1] + 2 * L[p + w] + L[p + w + 1] - L[p - w - 1] - 2 * L[p - w] - L[p - w + 1]
+          e = Math.min(1, Math.hypot(gx, gy) / span * 0.8)
+        }
+        const dist = Math.hypot(x - cxm, y - cym)
+        const glow = 1 - 0.55 * (dist / rmax)                          // radial backdrop gradient, lighter in the middle
+        e *= Math.min(1, Math.max(0, (dist - h * 0.42) / (h * 0.12)))  // no contours under our model (no ghost outline)
+        const v = (3 + 22 * t * glow) + 40 * e                          // lens: ~0–45 % brightness, symbols' edges brighter
+        d[i] = d[i + 1] = d[i + 2] = Math.min(70, v); d[i + 3] = 255
+      }
+      ctx.putImageData(img, 0, 0)
+      out = c
+    }
+  } catch { out = null }
+  backCache.set(key, out)
+  if (backCache.size > 40) backCache.delete(backCache.keys().next().value!)
+  return out
+}
+
 // ---------- drawing (TeleGift app style, grayscale) ----------
 const FONT = '-apple-system, "SF Pro Text", "Helvetica Neue", system-ui, sans-serif'
 // The lens brightens dark grays a lot (measured in the simulator: 12 → 38 %, 32 → 51 %, 64 → 70 %, 128 → 96 %),
@@ -144,7 +197,7 @@ function header(ctx: CanvasRenderingContext2D, right: string) {
   ctx.fillStyle = C.line; ctx.fillRect(10, 33, W - 20, 1)
 }
 
-function drawDeal(ctx: CanvasRenderingContext2D, d: Deal, pic: HTMLCanvasElement | null, pos: string) {
+function drawDeal(ctx: CanvasRenderingContext2D, d: Deal, pic: HTMLCanvasElement | null, back: HTMLCanvasElement | null, pos: string) {
   header(ctx, pos)
   // ---- gift card (like a card in the Live feed) ----
   const cx = 10, cy = 42, cw = 214, ch = 206
@@ -153,8 +206,12 @@ function drawDeal(ctx: CanvasRenderingContext2D, d: Deal, pic: HTMLCanvasElement
   const mh = 128
   ctx.save(); rrect(ctx, cx + 1, cy + 1, cw - 2, mh, 13); ctx.clip()
   ctx.fillStyle = C.media; ctx.fillRect(cx, cy, cw, mh + 2)
-  if (pic) { const s = mh * 0.86; ctx.drawImage(pic, cx + (cw - s) / 2, cy + (mh - s) / 2 + 4, s, s) }
+  if (back) ctx.drawImage(back, cx + 1, cy + 1)
+  if (pic) { const s = mh * 0.9; ctx.drawImage(pic, cx + (cw - s) / 2, cy + (mh - s) / 2 + 3, s, s) }
   ctx.restore()
+  // backdrop and pattern names on the picture
+  pill(ctx, cx + 7, cy + mh - 26, `◐ ${d.backdrop}`, `600 10px ${FONT}`, '#000', C.text)
+  if (d.pattern) pill(ctx, cx + cw - 7, cy + mh - 26, `✦ ${d.pattern}`, `600 10px ${FONT}`, '#000', C.text, true)
   ctx.fillStyle = C.faint; ctx.fillRect(cx + 1, cy + mh + 1, cw - 2, 1)
   pill(ctx, cx + 7, cy + 7, MARKET[d.market] || d.market, `700 11px ${FONT}`, '#000', C.text)
   pill(ctx, cx + cw - 7, cy + 7, `↗ ${d.x.toFixed(2).replace(/0$/, '')}×`, `800 12px ${FONT}`, '#000', '#fff', true)
@@ -290,7 +347,8 @@ function paint() {
   const pos = `${idx === 0 && d.seen_s < 120 ? 'NEW · ' : ''}deal ${idx + 1}/${total}` + (fresh ? ` · +${fresh} new` : ' · live')
   show(async () => {
     const { c, ctx } = blank()
-    drawDeal(ctx, d, await modelPicture(d.title, d.model, 160), pos)
+    const [pic, back] = await Promise.all([modelPicture(d.title, d.model, 160), giftBackdrop(d.id, 212, 128)])
+    drawDeal(ctx, d, pic, back, pos)
     return c
   })
   put(5, 'foot', tip || 'swipe: next    2× tap: exit', tip ? 4 : 1)
