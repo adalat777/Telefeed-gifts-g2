@@ -52,8 +52,8 @@ await bridge.createStartUpPageContainer(new CreateStartUpPageContainer(page))
 // After an app reload the glasses keep the old page — rebuild it so every container exists.
 await bridge.rebuildPageContainer(new RebuildPageContainer(page))
 
-function put(id: number, name: string, content: string) {
-  bridge.textContainerUpgrade(new TextContainerUpgrade({ containerID: id, containerName: name, content }))
+function put(id: number, name: string, content: string, textColor?: number) {
+  bridge.textContainerUpgrade(new TextContainerUpgrade({ containerID: id, containerName: name, content, textColor }))
 }
 
 // ---------- model picture: shading + contours, in grayscale ----------
@@ -182,7 +182,9 @@ function drawDeal(ctx: CanvasRenderingContext2D, d: Deal, pic: HTMLCanvasElement
   ctx.font = `500 13px ${FONT}`; ctx.fillStyle = C.dim; ctx.fillText('vs the top sale of this model + backdrop', rx, 128)
   ctx.fillStyle = C.line; ctx.fillRect(rx, 142, W - rx - 12, 1)
   const rows: [string, string][] = [
-    ['Floor', d.floor ? `${num(d.floor)} ★` : d.cheapest ? 'cheapest on sale' : '—'],
+    d.floor ? ['Floor', `${num(d.floor)} ★`]
+      : d.cheapest ? ['Floor', 'cheapest on sale']
+      : d.typical ? ['Usual', `${num(Math.round(d.typical))} ★ per sale`] : ['Floor', 'no other listings'],
     ['Sales', d.sales ? `${d.sales} of this model + backdrop` : '—'],
     ['Listed', `${ago(d.seen_s)} · ${MARKET[d.market] || d.market}`],
   ]
@@ -271,7 +273,7 @@ function paint() {
       else drawMessage(ctx, 'link Telegram', 'Connecting…', [])
       return c
     })
-    put(5, 'foot', tip || 'tap: skip (view only)   double tap: exit')
+    put(5, 'foot', tip || 'tap: skip    2× tap: exit', tip ? 4 : 1)
     return
   }
   const total = deals.length
@@ -281,7 +283,7 @@ function paint() {
       drawMessage(ctx, 'live', 'No underpriced gifts in the last hour', ['Watching Telegram Market, MRKT, Portals,', 'Tonnel and on-chain — new deals appear here.'])
       return c
     })
-    put(5, 'foot', tip || 'double tap: exit')
+    put(5, 'foot', tip || '2× tap: exit', tip ? 4 : 1)
     return
   }
   const d = deals[Math.min(idx, total - 1)]
@@ -291,7 +293,7 @@ function paint() {
     drawDeal(ctx, d, await modelPicture(d.title, d.model, 160), pos)
     return c
   })
-  put(5, 'foot', tip || 'swipe: next deal    double tap: exit')
+  put(5, 'foot', tip || 'swipe: next    2× tap: exit', tip ? 4 : 1)
 }
 
 function toast(t: string, ms = 2500) {
