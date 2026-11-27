@@ -207,6 +207,7 @@ function fit(ctx: CanvasRenderingContext2D, text: string, max: number) {
   while (text.length > 1 && ctx.measureText(text + '…').width > max) text = text.slice(0, -1)
   return text + '…'
 }
+const xs = (x: number) => x.toFixed(2).replace(/\.?0+$/, '')   // 2.00 → 2, 2.10 → 2.1, 2.22 → 2.22
 const usd = (v: number | null) => (v == null ? '' : `≈ $${v < 100 ? v.toFixed(2).replace(/\.00$/, '') : Math.round(v)}`)
 const priceText = (d: Deal) => (d.cur === 'STARS' ? `${num(d.price)} ★` : `${d.price < 100 ? d.price : Math.round(d.price)} GRAM`)
 
@@ -237,7 +238,7 @@ function drawDeal(ctx: CanvasRenderingContext2D, d: Deal, pic: HTMLCanvasElement
   if (d.pattern) pill(ctx, cx + cw - 7, cy + mh - 26, `✦ ${d.pattern}`, `600 10px ${FONT}`, '#000', C.text, true)
   ctx.fillStyle = C.faint; ctx.fillRect(cx + 1, cy + mh + 1, cw - 2, 1)
   pill(ctx, cx + 7, cy + 7, MARKET[d.market] || d.market, `700 11px ${FONT}`, '#000', C.text)
-  pill(ctx, cx + cw - 7, cy + 7, `↗ ${d.x.toFixed(2).replace(/0$/, '')}×`, `800 12px ${FONT}`, '#000', '#fff', true)
+  pill(ctx, cx + cw - 7, cy + 7, `↗ ${xs(d.x)}×`, `800 12px ${FONT}`, '#000', '#fff', true)
   ctx.textBaseline = 'alphabetic'
   let y = cy + mh + 22
   ctx.font = `700 15px ${FONT}`; ctx.fillStyle = C.text
@@ -258,7 +259,7 @@ function drawDeal(ctx: CanvasRenderingContext2D, d: Deal, pic: HTMLCanvasElement
   const rx = 242
   ctx.font = `600 12px ${FONT}`; ctx.fillStyle = C.dim; ctx.fillText('UNDERPRICED', rx, 62)
   ctx.font = `800 46px ${FONT}`; ctx.fillStyle = '#fff'
-  const xs = `↗ ${d.x.toFixed(2).replace(/0$/, '')}×`; ctx.fillText(xs, rx - 2, 108)
+  const big = `↗ ${xs(d.x)}×`; ctx.fillText(big, rx - 2, 108)
   ctx.font = `500 13px ${FONT}`; ctx.fillStyle = C.dim; ctx.fillText('vs the top sale of this model + backdrop', rx, 128)
   ctx.fillStyle = C.line; ctx.fillRect(rx, 142, W - rx - 12, 1)
   const rows: [string, string][] = [
