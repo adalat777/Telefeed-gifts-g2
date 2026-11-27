@@ -89,10 +89,14 @@ npm run dev          # Vite on :5173
 npm run simulate     # Even Hub simulator
 ```
 
-Public demo backend (temporary Cloudflare quick tunnel, set in `app/.env.production` and the whitelist in
-`app/app.json`): https://student-competent-cigarettes-answered.trycloudflare.com — `npm run build` / `npm run pack` use it.
+Public backend (runs on the TeleFeed server next to the live database; set in `app/.env.production` and the whitelist
+in `app/app.json`): https://g2.77-216-135-201.sslip.io — `npm run build` / `npm run pack` use it.
 
-One command for development: `./dev.sh` — backend + app + simulator, auto-updates from GitHub every 3 s.
+Browser demo (no glasses needed): open the app with `?demo` — the same code draws the 576×288 lens on the page;
+gestures by buttons, ↑ ↓ Enter, D (double tap), H (hold) and the mouse wheel.
+
+One command for development: `./dev.sh` — app + simulator against the public backend, auto-updates from GitHub every 3 s
+(`LOCAL_BACKEND=1 ./dev.sh` — run the backend on this machine instead).
 
 Real glasses: `npx evenhub qr --url http://<your-ip>:5173` and scan it in the Even Hub app. To use a remote backend,
 build with `VITE_API=https://<host>` and add the host to the `network` whitelist in `app/app.json`.
