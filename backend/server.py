@@ -159,11 +159,16 @@ def signals(limit=20, minutes=60):
             price, cur, usd = d["ton"], "GRAM", (d["ton"] * usd_rate if usd_rate else None)
         else:
             price, cur, usd = d.get("stars"), "STARS", (d["stars"] * STAR_USD if d.get("stars") else None)
+        floor = res.get("floor")
+        stars_now = d.get("stars")
+        cheapest = bool(floor and stars_now and floor >= stars_now)   # every other same lot costs more
+        if cheapest:
+            floor = None
         items.append({
             "id": d.get("slug") or str(d.get("id")), "title": d.get("title"), "num": d.get("num"),
             "model": d.get("model"), "backdrop": d.get("backdrop"), "pattern": d.get("pattern"),
             "price": price, "cur": cur, "usd": round(usd, 2) if usd else None,
-            "x": round(h.get("upside") or best or 0, 2), "floor": res.get("floor"), "typical": h.get("typical"),
+            "x": round(h.get("upside") or best or 0, 2), "floor": floor, "cheapest": cheapest, "typical": h.get("typical"),
             "max": h.get("max_stars"), "sales": h.get("sales"), "market": d.get("market") or "telegram",
             "url": d.get("url") or (f"https://t.me/nft/{d['slug']}" if d.get("slug") else None),
             "seen_s": int(time.time() - last),
@@ -184,7 +189,7 @@ def deal_text(it):
     lines = [f"🎁 {it.get('title')} #{it.get('num')}",
              f"{it.get('model')} · {it.get('backdrop')}" + (f" · {it['pattern']}" if it.get("pattern") else ""),
              f"💰 {price}{usd} on {MARKET.get(it.get('market'), it.get('market'))}",
-             f"📈 ×{it.get('x')} vs. the top sale of this model + backdrop" + (f" · floor {it['floor']} ⭐" if it.get("floor") else ""),
+             f"📈 ×{it.get('x')} vs. the top sale of this model + backdrop" + (f" · floor {it['floor']} ⭐" if it.get("floor") else (" · cheapest on sale" if it.get("cheapest") else "")),
              "", "Sent from your Even G2 · TeleGift Glance. Data, not financial advice."]
     return "\n".join(lines)
 

@@ -12,7 +12,7 @@ import {
 
 type Deal = {
   id: string; title: string; num: number; model: string; backdrop: string; pattern?: string
-  price: number; cur: 'STARS' | 'GRAM'; usd: number | null; x: number; floor: number | null
+  price: number; cur: 'STARS' | 'GRAM'; usd: number | null; x: number; floor: number | null; cheapest?: boolean
   typical: number | null; max: number | null; sales: number | null; market: string; url: string | null; seen_s: number
 }
 
@@ -90,7 +90,7 @@ function paint() {
     `${d.model} | ${d.backdrop}`,
     '',
     priceLine(d),
-    `x${d.x} vs top sale` + (d.floor ? `  |  floor ${num(d.floor)} Stars` : ''),
+    `x${d.x} vs top sale` + (d.floor ? `  |  floor ${num(d.floor)} Stars` : d.cheapest ? '  |  cheapest on sale' : ''),
     `${MARKET[d.market] || d.market}  |  ${ago(d.seen_s)}` + (d.sales ? `  |  ${d.sales} sales` : ''),
   ].join('\n'))
   const tip = token ? 'tap: send to Telegram' : 'tap: link Telegram'
