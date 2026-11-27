@@ -230,10 +230,12 @@ function header(ctx: CanvasRenderingContext2D, right: string) {
 
 function drawDeal(ctx: CanvasRenderingContext2D, d: Deal, pic: HTMLCanvasElement | null, back: HTMLCanvasElement | null, pos: string) {
   header(ctx, pos)
+  const hot = d.id === hotId && Date.now() < hotUntil
   // ---- gift card (like a card in the Live feed) ----
   const cx = 10, cy = 42, cw = 214, ch = 206
   rrect(ctx, cx, cy, cw, ch, 14); ctx.fillStyle = C.card; ctx.fill()
-  ctx.strokeStyle = C.line; ctx.lineWidth = 1; ctx.stroke()
+  ctx.strokeStyle = hot && Math.floor(Date.now() / 500) % 2 ? '#fff' : C.line; ctx.lineWidth = hot ? 3 : 1; ctx.stroke()
+
   const mh = 128
   ctx.save(); rrect(ctx, cx + 1, cy + 1, cw - 2, mh, 13); ctx.clip()
   ctx.fillStyle = C.media; ctx.fillRect(cx, cy, cw, mh + 2)
@@ -300,6 +302,13 @@ function drawDeal(ctx: CanvasRenderingContext2D, d: Deal, pic: HTMLCanvasElement
   const bw = ctx.measureText(label).width + 28
   rrect(ctx, rx, 222, bw, 26, 13); ctx.fillStyle = '#e8e8e8'; ctx.fill()
   ctx.fillStyle = '#000'; ctx.textBaseline = 'middle'; ctx.fillText(label, rx + 14, 235.5); ctx.textBaseline = 'alphabetic'
+  if (hot) {                                          // a very strong deal just arrived — badge in the header
+    ctx.font = `900 14px ${FONT}`
+    const t = 'HOT DEAL'
+    const w = ctx.measureText(t).width + 22
+    rrect(ctx, (W - w) / 2, 6, w, 22, 11); ctx.fillStyle = '#fff'; ctx.fill()
+    ctx.fillStyle = '#000'; ctx.textBaseline = 'middle'; ctx.fillText(t, (W - w) / 2 + 11, 17.5); ctx.textBaseline = 'alphabetic'
+  }
   if (d.sold) {                                       // someone was faster — stamp it
     ctx.save()
     rrect(ctx, cx + 1, cy + 1, cw - 2, ch - 2, 13); ctx.fillStyle = '#000'; ctx.fill()
@@ -317,6 +326,101 @@ function drawDeal(ctx: CanvasRenderingContext2D, d: Deal, pic: HTMLCanvasElement
     ctx.fillText('next deal in a moment…', cx + cw / 2, cy + 184)
     ctx.restore()
   }
+}
+
+const comboKey = (d: Deal) => `${d.title}|${d.model}|${d.backdrop}`
+
+async function loadDetail(d: Deal) {
+  const k = comboKey(d)
+  const have = detailCache.get(k)
+  if (have && have !== 'error') return
+  detailCache.set(k, 'loading')
+  try {
+    const r = await fetch(`${API}/detail?c=${encodeURIComponent(d.title)}&m=${encodeURIComponent(d.model)}&b=${encodeURIComponent(d.backdrop)}`)
+    detailCache.set(k, r.ok ? await r.json() as Detail : 'error')
+  } catch { detailCache.set(k, 'error') }
+  if (view === 'detail') paint()
+}
+
+function drawDetail(ctx: CanvasRenderingContext2D, d: Deal, det: Detail | 'loading' | 'error' | undefined) {
+  header(ctx, `${d.title} #${d.num}`)
+  ctx.textBaseline = 'alphabetic'
+  ctx.font = `600 12px ${FONT}`; ctx.fillStyle = C.dim
+  ctx.fillText(fit(ctx, `${d.model} · ${d.backdrop} — sales, last 30 days`, 330), 12, 54)
+  if (!det || det === 'loading' || det === 'error') {
+    ctx.font = `600 18px ${FONT}`; ctx.fillStyle = C.text
+    ctx.fillText(det === 'error' ? 'No connection to the sales data' : 'Loading sales…', 12, 120)
+    return
+  }
+  // ---- chart: daily median price on Telegram Market, and this deal's price as a dashed line ----
+  const X0 = 14, X1 = 330, Y0 = 70, Y1 = 214
+  const pts = det.chart.map((c, i) => ({ i, v: c.usd })).filter((p) => p.v != null) as { i: number; v: number }[]
+  const dealUsd = d.usd || 0
+  const vals = pts.map((p) => p.v).concat(dealUsd ? [dealUsd] : [])
+  ctx.strokeStyle = C.line; ctx.lineWidth = 1
+  ctx.strokeRect(X0 + 0.5, Y0 + 0.5, X1 - X0, Y1 - Y0)
+  if (pts.length >= 2) {
+    const lo = Math.min(...vals) * 0.9, hi = Math.max(...vals) * 1.08
+    const xOf = (i: number) => X0 + 6 + (i / (det.days - 1)) * (X1 - X0 - 12)
+    const yOf = (v: number) => Y1 - 6 - ((v - lo) / (hi - lo || 1)) * (Y1 - Y0 - 12)
+    // soft fill under the line
+    ctx.beginPath(); ctx.moveTo(xOf(pts[0].i), Y1)
+    for (const p of pts) ctx.lineTo(xOf(p.i), yOf(p.v))
+    ctx.lineTo(xOf(pts[pts.length - 1].i), Y1); ctx.closePath()
+    ctx.fillStyle = '#060606'; ctx.fill()                // the lens lifts dark grays: keep the fill almost black
+    ctx.beginPath()
+    pts.forEach((p, j) => (j ? ctx.lineTo(xOf(p.i), yOf(p.v)) : ctx.moveTo(xOf(p.i), yOf(p.v))))
+    ctx.strokeStyle = '#fff'; ctx.lineWidth = 2.5; ctx.lineJoin = 'round'; ctx.stroke()
+    for (const p of pts) { ctx.beginPath(); ctx.arc(xOf(p.i), yOf(p.v), 2.2, 0, Math.PI * 2); ctx.fillStyle = '#fff'; ctx.fill() }
+    if (dealUsd) {
+      const y = yOf(dealUsd)
+      ctx.setLineDash([5, 4]); ctx.strokeStyle = C.text; ctx.lineWidth = 1.5
+      ctx.beginPath(); ctx.moveTo(X0 + 2, y); ctx.lineTo(X1 - 2, y); ctx.stroke(); ctx.setLineDash([])
+      ctx.font = `700 12px ${FONT}`
+      const t = `this deal $${money(dealUsd)}`
+      const w = ctx.measureText(t).width + 10
+      ctx.fillStyle = '#000'; ctx.fillRect(X1 - w - 6, y - 9, w, 17)
+      ctx.fillStyle = '#fff'; ctx.textBaseline = 'middle'; ctx.fillText(t, X1 - w - 1, y); ctx.textBaseline = 'alphabetic'
+    }
+    ctx.font = `500 11px ${FONT}`; ctx.fillStyle = C.dim
+    ctx.fillText(`$${money(Math.max(...pts.map((p) => p.v)))}`, X0 + 6, Y0 + 14)
+    ctx.fillText(`${det.chart[0].day.slice(5)}`, X0 + 4, Y1 + 14)
+    const last = det.chart[det.chart.length - 1].day.slice(5)
+    ctx.fillText(last, X1 - ctx.measureText(last).width - 2, Y1 + 14)
+    const total = det.chart.reduce((a, c) => a + c.n, 0)
+    const mid = `${total} sales on Telegram Market`
+    ctx.fillText(mid, (X0 + X1 - ctx.measureText(mid).width) / 2, Y1 + 14)
+  } else {
+    ctx.font = `600 14px ${FONT}`; ctx.fillStyle = C.text
+    ctx.fillText('Too few Telegram Market sales', X0 + 14, (Y0 + Y1) / 2)
+  }
+  // ---- marketplaces: median sale price as bars ----
+  const RX = 350
+  ctx.font = `600 12px ${FONT}`; ctx.fillStyle = C.dim; ctx.fillText('MEDIAN SALE BY MARKETPLACE', RX, 54)
+  const vs = det.venues.filter((v) => v.usd)
+  const top = Math.max(1, ...vs.map((v) => v.usd as number))
+  let y = 78
+  for (const v of det.venues) {
+    ctx.font = `600 13px ${FONT}`; ctx.fillStyle = v.usd ? C.text : C.dim
+    ctx.fillText(v.name, RX, y)
+    if (v.usd) {
+      const bw = Math.max(6, ((v.usd as number) / top) * 112)
+      rrect(ctx, RX + 66, y - 10, bw, 11, 3); ctx.fillStyle = '#fff'; ctx.fill()
+      ctx.font = `700 12px ${FONT}`; ctx.fillStyle = C.text
+      ctx.fillText(`$${money(v.usd as number)}`, RX + 72 + bw, y)
+    } else {
+      ctx.font = `500 12px ${FONT}`; ctx.fillStyle = C.dim; ctx.fillText('no sales', RX + 66, y)
+    }
+    y += 24
+  }
+  // watch button
+  const on = watched.has(d.id)
+  const label = on ? '✓ Watching' : token ? 'Tap — watch this deal' : 'Tap — link Telegram'
+  ctx.font = `700 13px ${FONT}`
+  const bw = ctx.measureText(label).width + 26
+  rrect(ctx, RX, 222, bw, 26, 13)
+  if (on) { ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.5; ctx.stroke(); ctx.fillStyle = '#fff' } else { ctx.fillStyle = '#e8e8e8'; ctx.fill(); ctx.fillStyle = '#000' }
+  ctx.textBaseline = 'middle'; ctx.fillText(label, RX + 13, 235.5); ctx.textBaseline = 'alphabetic'
 }
 
 function drawMessage(ctx: CanvasRenderingContext2D, right: string, title: string, lines: string[], big?: string) {
@@ -370,6 +474,13 @@ let idx = 0
 let fresh = 0                     // new deals arrived while you were looking at an older one
 let token = localStorage.getItem(TOKEN_KEY) || ''
 let mode: 'pair' | 'deals' = token ? 'deals' : 'pair'
+let view: 'card' | 'detail' = 'card'           // long press on a deal → its price chart and marketplaces
+type Detail = { chart: { day: string; usd: number | null; n: number }[]; venues: { market: string; name: string; n: number; usd: number | null }[]; days: number }
+const detailCache = new Map<string, Detail | 'loading' | 'error'>()
+const watched = new Set<string>()
+let hotId = ''                                  // a very strong fresh deal that jumped to the screen
+let hotUntil = 0
+const HOT_X = 3
 let pairCode = ''
 let toastUntil = 0
 let toastText = ''
@@ -414,6 +525,13 @@ function paint() {
     return
   }
   const d = deals[Math.min(idx, total - 1)]
+  if (view === 'detail') {
+    const det = detailCache.get(comboKey(d))
+    if (!det) loadDetail(d)
+    show(async () => { const { c, ctx } = blank(); drawDetail(ctx, d, det); return c })
+    put(5, 'foot', tip || 'swipe: back    2× tap: back', tip ? 4 : 1)
+    return
+  }
   const pos = `${idx === 0 && d.seen_s < 120 ? 'NEW · ' : ''}deal ${idx + 1}/${total}` + (fresh ? ` · +${fresh} new` : ' · live')
   show(async () => {
     const { c, ctx } = blank()
@@ -421,7 +539,7 @@ function paint() {
     drawDeal(ctx, d, pic, back, pos)
     return c
   })
-  put(5, 'foot', tip || 'swipe: next    2× tap: exit', tip ? 4 : 1)
+  put(5, 'foot', tip || 'swipe: next    hold: chart    2× tap: exit', tip ? 4 : 1)
 }
 
 function toast(t: string, ms = 2500) {
@@ -466,8 +584,12 @@ async function poll() {
     const added = items.filter((d) => !known.has(d.id)).length
     const cur = curDeal?.id
     pollAt = Date.now()
+    const hot = known.size ? items.find((d) => !known.has(d.id) && d.x >= HOT_X && d.seen_s < 60) : undefined
     deals = curDeal?.sold ? [curDeal, ...items.filter((d) => d.id !== curDeal.id)] : items
-    if (idx > 0 && cur) {                         // keep your place while you browse older deals
+    if (hot && view === 'card' && !confirmDeal) {      // a very strong fresh deal jumps to the screen
+      idx = Math.max(0, deals.indexOf(hot)); fresh = 0
+      hotId = hot.id; hotUntil = Date.now() + 10000
+    } else if (idx > 0 && cur) {                         // keep your place while you browse older deals
       const j = deals.findIndex((d) => d.id === cur)
       idx = j >= 0 ? j : 0
       fresh += known.size ? added : 0
@@ -507,6 +629,19 @@ async function startPairing() {
   }
 }
 
+async function watchCurrent() {
+  const d = deals[idx]
+  if (!d) return
+  if (!token) { view = 'card'; startPairing(); return }
+  if (watched.has(d.id)) return
+  try {
+    const r = await fetch(`${API}/watch`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token, item: d }),
+    })
+    if (r.ok) { watched.add(d.id); toast('Watching — the bot will write if it gets cheaper or is sold') } else toast('Could not set the watch')
+  } catch { toast('No connection. Tap to retry.') }
+}
+
 async function sendCurrent() {
   const d = deals[idx]
   if (!d) return
@@ -537,8 +672,18 @@ function eventTypeOf(envelope?: { eventType?: OsEventTypeList }): OsEventTypeLis
 bridge.onEvenHubEvent((event) => {
   const sysType = eventTypeOf(event.sysEvent)
   const textType = eventTypeOf(event.textEvent)
-  if (sysType === OsEventTypeList.DOUBLE_CLICK_EVENT || textType === OsEventTypeList.DOUBLE_CLICK_EVENT) {
+  const is = (t: OsEventTypeList) => sysType === t || textType === t
+  if (is(OsEventTypeList.LONG_PRESS_RELEASE_EVENT)) return
+  if (is(OsEventTypeList.LONG_PRESS_EVENT)) {                     // hold: the deal's chart and marketplaces
+    if (mode === 'deals' && deals.length) { view = view === 'card' ? 'detail' : 'card'; paint() }
+    return
+  }
+  if (is(OsEventTypeList.DOUBLE_CLICK_EVENT)) {
+    if (view === 'detail') { view = 'card'; paint(); return }
     bridge.shutDownPageContainer(1); return
+  }
+  if (view === 'detail' && (textType === OsEventTypeList.SCROLL_BOTTOM_EVENT || textType === OsEventTypeList.SCROLL_TOP_EVENT)) {
+    view = 'card'; paint(); return
   }
   if (textType === OsEventTypeList.SCROLL_BOTTOM_EVENT && mode === 'deals' && deals.length) {
     idx = Math.min(deals.length - 1, idx + 1); paint(); return
@@ -548,6 +693,7 @@ bridge.onEvenHubEvent((event) => {
   }
   if (sysType === OsEventTypeList.CLICK_EVENT || textType === OsEventTypeList.CLICK_EVENT) {
     if (mode === 'pair') { mode = 'deals'; paint(); return }   // skip linking: view only
+    if (view === 'detail') { watchCurrent(); return }
     sendCurrent()
   }
 })
@@ -556,4 +702,4 @@ paint()
 if (mode === 'pair') startPairing()
 poll()
 setInterval(poll, POLL_MS)
-setInterval(() => { if (mode === 'deals' && deals.length && !drawing) paint() }, 1000)   // 'listed Ns ago' ticks
+setInterval(() => { if (mode === 'deals' && deals.length && !drawing) paint() }, 500)   // timer ticks, HOT blinks   // 'listed Ns ago' ticks
