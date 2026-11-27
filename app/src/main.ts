@@ -58,6 +58,7 @@ function put(id: number, name: string, content: string, textColor?: number) {
 
 // ---------- model picture: shading + contours, in grayscale ----------
 const modelCache = new Map<string, HTMLCanvasElement | null>()
+const MODEL_PX = 116                     // drawn pixel-for-pixel on the lens
 
 async function modelPicture(title: string, model: string, size: number): Promise<HTMLCanvasElement | null> {
   const key = `${title}|${model}|${size}`
@@ -70,8 +71,16 @@ async function modelPicture(title: string, model: string, size: number): Promise
       const c = document.createElement('canvas'); c.width = c.height = size
       const ctx = c.getContext('2d')!
       const k = Math.min(size / bmp.width, size / bmp.height)
-      const w = bmp.width * k, h = bmp.height * k
-      ctx.drawImage(bmp, (size - w) / 2, (size - h) / 2, w, h)
+      const w = Math.round(bmp.width * k), h = Math.round(bmp.height * k)
+      // shrink in halves (1024 → 512 → 256 → size): much sharper than one big jump
+      let src: CanvasImageSource = bmp, sw = bmp.width, sh = bmp.height
+      while (sw / 2 > w) {
+        const t = document.createElement('canvas'); t.width = Math.round(sw / 2); t.height = Math.round(sh / 2)
+        const tc = t.getContext('2d')!; tc.imageSmoothingQuality = 'high'; tc.drawImage(src, 0, 0, t.width, t.height)
+        src = t; sw = t.width; sh = t.height
+      }
+      ctx.imageSmoothingQuality = 'high'
+      ctx.drawImage(src, Math.round((size - w) / 2), Math.round((size - h) / 2), w, h)
       const img = ctx.getImageData(0, 0, size, size)
       const d = img.data, N = size * size
       const lum = new Float32Array(N), alpha = new Float32Array(N), vals: number[] = []
@@ -87,6 +96,13 @@ async function modelPicture(title: string, model: string, size: number): Promise
       const span = Math.max(20, hi - lo)
       const tone = new Float32Array(N)
       for (let p = 0; p < N; p++) tone[p] = Math.min(1, Math.max(0, (lum[p] - lo) / span)) * alpha[p]
+      const sharp = new Float32Array(tone)                       // unsharp mask: details and small shapes pop
+      for (let y = 1; y < size - 1; y++) for (let x = 1; x < size - 1; x++) {
+        const p = y * size + x
+        const blur = (tone[p - 1] + tone[p + 1] + tone[p - size] + tone[p + size]) / 4
+        sharp[p] = Math.min(1, Math.max(0, tone[p] + 1.1 * (tone[p] - blur)))
+      }
+      tone.set(sharp)
       for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) {
         const p = y * size + x, i = p * 4
         let e = 0
@@ -124,8 +140,15 @@ async function giftBackdrop(slug: string, w: number, h: number): Promise<HTMLCan
       const c = document.createElement('canvas'); c.width = w; c.height = h
       const ctx = c.getContext('2d')!
       const k = Math.max(w / bmp.width, h / bmp.height)          // cover, centered
-      const dw = bmp.width * k, dh = bmp.height * k
-      ctx.drawImage(bmp, (w - dw) / 2, (h - dh) / 2, dw, dh)
+      const dw = Math.round(bmp.width * k), dh = Math.round(bmp.height * k)
+      let src: CanvasImageSource = bmp, sw = bmp.width, sh = bmp.height
+      while (sw / 2 > dw) {                                       // shrink in halves — sharper symbols
+        const t = document.createElement('canvas'); t.width = Math.round(sw / 2); t.height = Math.round(sh / 2)
+        const tc = t.getContext('2d')!; tc.imageSmoothingQuality = 'high'; tc.drawImage(src, 0, 0, t.width, t.height)
+        src = t; sw = t.width; sh = t.height
+      }
+      ctx.imageSmoothingQuality = 'high'
+      ctx.drawImage(src, Math.round((w - dw) / 2), Math.round((h - dh) / 2), dw, dh)
       const img = ctx.getImageData(0, 0, w, h)
       const d = img.data, N = w * h
       const lum = new Float32Array(N)
@@ -207,7 +230,7 @@ function drawDeal(ctx: CanvasRenderingContext2D, d: Deal, pic: HTMLCanvasElement
   ctx.save(); rrect(ctx, cx + 1, cy + 1, cw - 2, mh, 13); ctx.clip()
   ctx.fillStyle = C.media; ctx.fillRect(cx, cy, cw, mh + 2)
   if (back) ctx.drawImage(back, cx + 1, cy + 1)
-  if (pic) { const s = mh * 0.9; ctx.drawImage(pic, cx + (cw - s) / 2, cy + (mh - s) / 2 + 3, s, s) }
+  if (pic) ctx.drawImage(pic, Math.round(cx + (cw - MODEL_PX) / 2), Math.round(cy + (mh - MODEL_PX) / 2 + 3))   // 1:1, no blur
   ctx.restore()
   // backdrop and pattern names on the picture
   pill(ctx, cx + 7, cy + mh - 26, `◐ ${d.backdrop}`, `600 10px ${FONT}`, '#000', C.text)
@@ -347,7 +370,7 @@ function paint() {
   const pos = `${idx === 0 && d.seen_s < 120 ? 'NEW · ' : ''}deal ${idx + 1}/${total}` + (fresh ? ` · +${fresh} new` : ' · live')
   show(async () => {
     const { c, ctx } = blank()
-    const [pic, back] = await Promise.all([modelPicture(d.title, d.model, 160), giftBackdrop(d.id, 212, 128)])
+    const [pic, back] = await Promise.all([modelPicture(d.title, d.model, MODEL_PX), giftBackdrop(d.id, 212, 128)])
     drawDeal(ctx, d, pic, back, pos)
     return c
   })
