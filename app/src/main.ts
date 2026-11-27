@@ -22,6 +22,7 @@ type Deal = {
   resell?: { sell: number; net: number; cost_usd: number; get_usd: number; profit_usd: number } | null
   fair?: number | null; stars?: number | null; rs_pct?: number | null; rs_good?: boolean
   mr?: string | null; br?: string | null; pr?: string | null
+  max_mk?: string                        // the marketplace of the top sale the "×" is measured to
   sold?: boolean
 }
 
@@ -959,7 +960,7 @@ const G_MID = '#5c5c5c', G_DIM = '#262626'
 function capsText(ctx: CanvasRenderingContext2D, text: string, x: number, y: number, max: number, font: string, color: string) {
   ctx.font = font; ctx.fillStyle = color
   const c = ctx as CanvasRenderingContext2D & { letterSpacing?: string }
-  c.letterSpacing = '1.4px'
+  c.letterSpacing = '1.1px'
   ctx.fillText(fit(ctx, text.toUpperCase(), max), x, y)
   c.letterSpacing = '0px'
 }
@@ -1003,7 +1004,9 @@ function drawGlance(ctx: CanvasRenderingContext2D, d: Deal, pic: HTMLCanvasEleme
   const below = d.fair && d.stars && d.stars < d.fair ? Math.round((1 - d.stars / d.fair) * 100) : 0
   // the "×" is to the top clean sale of this model + backdrop — say so, with that price (owner 27.11; "usual" removed)
   // in dollars, the same way as the price on top (owner 27.11): × times this lot's dollar price
-  const parts: string[] = [dollars != null ? `max sale $${money(d.x * dollars)}` : 'to max sale']
+  const mk = d.max_mk ? ` · ${d.max_mk}` : ''                     // the marketplace of that top sale (owner 27.11)
+  const maxUsd = dollars != null ? d.x * dollars : null
+  const parts: string[] = [maxUsd != null ? `max sale $${maxUsd >= 10 ? Math.round(maxUsd) : money(maxUsd)}${mk}` : `to max sale${mk}`]
   if (below >= 5) parts.push(`${below}% below market`)
   if (rs) parts.push(`sell ~${num(rs.sell)} ★ → +${Math.round((rs.profit_usd / Math.max(0.01, rs.cost_usd)) * 100)}%`)
   if (parts.length) capsText(ctx, parts.join('  ·  '), x + xw, 210, W - x - xw - 12, `600 12px ${FONT}`, G_MID)
