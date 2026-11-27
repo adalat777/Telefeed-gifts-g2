@@ -39,9 +39,11 @@ const bridge = await waitForEvenAppBridge()
 // also receives the touch events.
 const W = 576, H = 256, TW = 288
 const TILES = [
-  { id: 1, name: 't1', x: 0, y: 0, w: TW, h: 144 },
+  // left column split at y=100 so the whole model (y 106..222) sits in ONE tile: an animation frame resends just t3
+  // (a tile is at most 288×144, so the left column's last 12 px, y 244..256, stay unused)
+  { id: 1, name: 't1', x: 0, y: 0, w: TW, h: 100 },
   { id: 2, name: 't2', x: TW, y: 0, w: TW, h: 144 },
-  { id: 3, name: 't3', x: 0, y: 144, w: TW, h: H - 144 },
+  { id: 3, name: 't3', x: 0, y: 100, w: TW, h: 144 },
   { id: 4, name: 't4', x: TW, y: 144, w: TW, h: H - 144 },
 ]
 const tiles = TILES.map((t) => new ImageContainerProperty({
@@ -138,10 +140,14 @@ function lensify(bmp: CanvasImageSource & { width: number; height: number }, siz
 
 // ---------- model animation: a few frames of the gift's own animation, played once when a new deal shows ----------
 // Only gifts that are on Fragment have it (on-chain collections); the others keep the still picture.
-const ANIM_FRAMES = 10, ANIM_MS = 330          // ~3 frames a second: the lens redraws only the tiles that changed
-const animCache = new Map<string, Promise<HTMLCanvasElement[] | null>>()
+// Played at the animation's own speed: each frame goes out as soon as the lens took the previous one; if the lens is slower,
+// frames are skipped by the clock (never slowed down or jerked), so the motion stays even.
+const ANIM_FRAMES = 90                           // up to 30 frames a second of a 3 s animation
+type Frames = HTMLCanvasElement[] & { dur?: number }
+const animCache = new Map<string, Promise<Frames | null>>()
+const restFrame = new Map<string, HTMLCanvasElement>()   // after playing, the deal keeps the animation's first frame (no jump to the still picture)
 
-function modelFrames(slug: string): Promise<HTMLCanvasElement[] | null> {
+function modelFrames(slug: string): Promise<Frames | null> {
   if (!animCache.has(slug)) {
     animCache.set(slug, (async () => {
       try {
@@ -156,12 +162,30 @@ function modelFrames(slug: string): Promise<HTMLCanvasElement[] | null> {
         await new Promise<void>((res) => { if (a.isLoaded) res(); else { a.addEventListener('DOMLoaded', () => res()); setTimeout(res, 1500) } })
         const cv = box.querySelector('canvas')
         if (!cv) { a.destroy(); box.remove(); return null }
-        const n = Math.max(1, a.totalFrames - 1)
-        const out: HTMLCanvasElement[] = []
+        const n = Math.max(1, a.totalFrames - 1), count = Math.min(ANIM_FRAMES, n)
+        const out: Frames = []
+        out.dur = Math.min(4000, Math.max(800, (1000 * a.totalFrames) / (a.frameRate || 60)))
         let range: [number, number] | undefined
-        for (let i = 0; i < ANIM_FRAMES; i++) {
-          a.goToAndStop(Math.round((i * n) / ANIM_FRAMES), true)
-          const f = lensify(cv, MODEL_PX, range)
+        // the animation has wide empty margins: find the box the model ever occupies (every 6th frame) and crop all frames
+        // to that same box — the model is as big as on the still picture and does not jump between frames
+        const cx = cv.getContext('2d')!
+        let x0 = cv.width, y0 = cv.height, x1 = 0, y1 = 0
+        for (let i = 0; i < count; i += 6) {
+          a.goToAndStop(Math.round((i * n) / count), true)
+          const px = cx.getImageData(0, 0, cv.width, cv.height).data
+          for (let y = 0; y < cv.height; y += 2) for (let x = 0; x < cv.width; x += 2)
+            if (px[(y * cv.width + x) * 4 + 3] > 24) { if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y }
+        }
+        if (x1 <= x0) { x0 = 0; y0 = 0; x1 = cv.width - 1; y1 = cv.height - 1 }
+        const side = Math.min(cv.width, Math.max(x1 - x0, y1 - y0) + 8)
+        const sx = Math.max(0, Math.min(cv.width - side, Math.round((x0 + x1 - side) / 2)))
+        const sy = Math.max(0, Math.min(cv.height - side, Math.round((y0 + y1 - side) / 2)))
+        const crop = document.createElement('canvas'); crop.width = crop.height = side
+        const cc = crop.getContext('2d')!
+        for (let i = 0; i < count; i++) {
+          a.goToAndStop(Math.round((i * n) / count), true)
+          cc.clearRect(0, 0, side, side); cc.drawImage(cv, sx, sy, side, side, 0, 0, side, side)
+          const f = lensify(crop, MODEL_PX, range)
           range = range || f.range
           out.push(f.c)
           await new Promise((res) => setTimeout(res, 0))       // let the lens keep drawing meanwhile
@@ -175,19 +199,38 @@ function modelFrames(slug: string): Promise<HTMLCanvasElement[] | null> {
   return animCache.get(slug)!
 }
 
+// the frame to rest on: the first one, unless the model is not fully there yet (some animations start empty)
+function fullest(frames: Frames) {
+  const ink = (c: HTMLCanvasElement) => { const d = c.getContext('2d')!.getImageData(0, 0, c.width, c.height).data; let t = 0; for (let i = 3; i < d.length; i += 4) t += d[i]; return t }
+  const mid = frames[Math.floor(frames.length / 2)]
+  return ink(frames[0]) >= 0.8 * ink(mid) ? frames[0] : mid
+}
+
 let animId = '', animStep = -1                  // the deal being animated and the frame shown (-1: still picture)
-const animated = new Set<string>()              // each deal plays once
+const animated = new Set<string>()              // deals whose animation is loading or looping now
 async function playModel(d: Deal) {
   if (animated.has(d.id) || animId) return
   animated.add(d.id)
   const frames = await modelFrames(d.id)
-  if (!frames || deals[idx]?.id !== d.id || view !== 'glance' || asleep) return
+  if (!frames) return                                          // no animation: stays marked, the still picture is used
+  if (deals[idx]?.id !== d.id || view !== 'glance' || asleep) { animated.delete(d.id); return }
   animId = d.id
-  for (let i = 0; i < frames.length; i++) {
-    if (deals[idx]?.id !== d.id || view !== 'glance' || asleep) break
-    animStep = i; paint()
-    await new Promise((res) => setTimeout(res, ANIM_MS))
+  // loops without a stop while this deal is on the glance; leaves → stops (and starts again when you come back)
+  const dur = frames.dur || 3000, start = performance.now()
+  let shown = 0
+  for (;;) {
+    if (deals[idx]?.id !== d.id || view !== 'glance' || asleep || (confirmDeal && Date.now() < confirmUntil)) break
+    const el = (performance.now() - start) % dur
+    const i = Math.min(frames.length - 1, Math.floor((el / dur) * frames.length))
+    if (i === animStep) { await new Promise((res) => setTimeout(res, 8)); continue }
+    animStep = i; paint(); shown++
+    await new Promise((res) => setTimeout(res, 0))
+    while (drawing) await new Promise((res) => setTimeout(res, 8))      // wait until this frame is on the lens
   }
+  console.log('anim fps', ((1000 * shown) / (performance.now() - start)).toFixed(1), 'of', ((1000 * frames.length) / dur).toFixed(1))
+  animated.delete(d.id)
+  restFrame.set(d.id, fullest(frames))
+  if (restFrame.size > 30) restFrame.delete(restFrame.keys().next().value!)
   animId = ''; animStep = -1
   if (deals[idx]?.id === d.id) paint()
 }
@@ -336,7 +379,7 @@ function drawDeal(ctx: CanvasRenderingContext2D, d: Deal, pic: HTMLCanvasElement
   header(ctx, pos)
   const hot = d.id === hotId && Date.now() < hotUntil
   // ---- gift card (like a card in the Live feed) ----
-  const cx = 10, cy = 42, cw = 214, ch = 206
+  const cx = 10, cy = 40, cw = 214, ch = 202   // ends at y 242: the left column below y 244 is not shown
   rrect(ctx, cx, cy, cw, ch, 14); ctx.fillStyle = C.card; ctx.fill()
   ctx.strokeStyle = hot && Math.floor(Date.now() / 500) % 2 ? '#fff' : C.line; ctx.lineWidth = hot ? 3 : 1; ctx.stroke()
 
@@ -537,7 +580,7 @@ function drawGlance(ctx: CanvasRenderingContext2D, d: Deal, pic: HTMLCanvasEleme
     rrect(ctx, (W - w) / 2, 6, w, 22, 11); ctx.fillStyle = '#fff'; ctx.fill()
     ctx.fillStyle = '#000'; ctx.textBaseline = 'middle'; ctx.fillText(t, (W - w) / 2 + 11, 17.5); ctx.textBaseline = 'alphabetic'
   }
-  if (pic) ctx.drawImage(pic, 14, 62)
+  if (pic) ctx.drawImage(pic, 14, 106)
   const x = 150
   const rs = d.resell && d.resell.profit_usd > 0.5 ? d.resell : null
   ctx.fillStyle = '#fff'; ctx.font = `800 62px ${FONT}`
@@ -682,7 +725,7 @@ function paint() {
     show(async () => {
       const { c, ctx } = blank()
       const frames = animId === d.id && animStep >= 0 ? await modelFrames(d.id) : null
-      drawGlance(ctx, d, frames ? frames[animStep] : await modelPicture(d.title, d.model, MODEL_PX), pos)
+      drawGlance(ctx, d, frames ? frames[animStep] : restFrame.get(d.id) || await modelPicture(d.title, d.model, MODEL_PX), pos)
       return c
     })
     if (!d.sold) playModel(d)
