@@ -582,6 +582,97 @@ def _median(xs):
     return xs[len(xs) // 2] if xs else None
 
 
+def _iso_ts(t):
+    try:
+        return int(time.mktime(time.strptime(t[:19], "%Y-%m-%dT%H:%M:%S")) - time.timezone)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _num_of(slug):
+    m = re.search(r"-(\d+)$", slug or "")
+    return int(m.group(1)) if m else None
+
+
+_hist_cache = {}
+
+
+def sales_history(col, model, backdrop, slug="", n=7):
+    """Read-only: the last sales of this model + backdrop on every marketplace we collect, newest first,
+    plus a one-line summary (usual price, top sale, sales this week) — the glasses' "sales history" screen."""
+    key = (col, model, backdrop, slug, n)
+    hit = _hist_cache.get(key)
+    if hit and time.time() - hit[0] < 60:
+        return hit[1]
+    since = time.time() - 90 * 86400
+    since_iso = time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime(since))
+    db = sqlite3.connect(f"file:{DB}?mode=ro", uri=True, timeout=5)
+    rows = []          # (ts, market, cur, price, ton, slug, num)
+    try:
+        r = db.execute("SELECT usd FROM ton_usd ORDER BY day DESC LIMIT 1").fetchone()
+        rate = float(r[0]) if r else None
+        for t, cur, price, norm, sl in db.execute(
+                "SELECT sold_at, currency, price, normalized, slug FROM sales INDEXED BY sales_combo "
+                "WHERE collection=? AND model=? AND backdrop=? AND sold_at >= ? ORDER BY sold_at DESC LIMIT 300",
+                (col, model, backdrop, since_iso)):
+            if cur == "STARS" and price:
+                rows.append((_iso_ts(t), "telegram", "STARS", price, norm, sl, _num_of(sl)))
+            elif norm:
+                rows.append((_iso_ts(t), "telegram", "GRAM", norm, norm, sl, _num_of(sl)))
+        for m in ("mrkt", "portals", "tonnel", "getgems"):
+            try:
+                for t, ton, sl in db.execute(
+                        "SELECT sold_at, ton, slug FROM msales INDEXED BY msales_combo WHERE market=? AND collection=? "
+                        "AND model=? AND backdrop=? AND sold_at >= ? ORDER BY sold_at DESC LIMIT 100", (m, col, model, backdrop, since_iso)):
+                    if ton:
+                        rows.append((_iso_ts(t), m, "GRAM", ton, ton, sl, _num_of(sl)))
+            except sqlite3.Error:
+                pass
+        try:
+            for t, ton, sl, num in db.execute(
+                    "SELECT sold_at, ton, slug, num FROM portals_sales WHERE title=? AND model=? AND backdrop=? AND sold_at >= ? "
+                    "ORDER BY sold_at DESC LIMIT 100", (col, model, backdrop, since)):
+                if ton:
+                    rows.append((int(t), "portals", "GRAM", ton, ton, sl, num))
+        except sqlite3.Error:
+            pass
+        try:
+            for t, ton, num in db.execute(
+                    "SELECT ts, ton, num FROM onchain_sales WHERE collection=? AND model=? AND backdrop=? AND ts >= ? AND src != dst "
+                    "AND market NOT IN ('Telegram', 'Getgems') ORDER BY ts DESC LIMIT 100", (col, model, backdrop, int(since))):
+                if ton:
+                    rows.append((int(t), "onchain", "GRAM", ton, ton, None, num))
+        except sqlite3.Error:
+            pass
+    finally:
+        db.close()
+    # the same sale seen by two sources (Portals API and Gift Satellite): same gift, ±10 min → once
+    rows.sort(key=lambda x: -x[0])
+    uniq = []
+    for x in rows:
+        if any(u[6] and u[6] == x[6] and abs(u[0] - x[0]) < 600 for u in uniq[-6:]):
+            continue
+        uniq.append(x)
+    usd_of = lambda cur, price, ton: (price * STAR_OUT_USD if cur == "STARS" else (ton * rate if rate else None))
+    tons = _clean([x[4] for x in uniq if x[4]])
+    ok = set(tons)
+    week = sum(1 for x in uniq if x[0] >= time.time() - 7 * 86400)
+    month = [x for x in uniq if x[0] >= time.time() - 30 * 86400 and x[4] in ok]
+    usual = _median([usd_of(x[2], x[3], x[4]) for x in month if usd_of(x[2], x[3], x[4])])
+    top = max((x for x in uniq if x[4] in ok), key=lambda x: x[4], default=None)
+    own = _num_of(slug)
+    items = [{"at": x[0], "market": x[1], "cur": x[2], "price": round(x[3], 2) if x[2] == "GRAM" else int(x[3]),
+              "usd": round(usd_of(x[2], x[3], x[4]), 2) if usd_of(x[2], x[3], x[4]) else None, "num": x[6],
+              "mine": bool(own and x[6] == own)} for x in uniq[:n]]
+    out = {"items": items, "week": week, "total": len(uniq), "usual_usd": round(usual, 2) if usual else None,
+           "top": ({"usd": round(usd_of(top[2], top[3], top[4]), 2) if usd_of(top[2], top[3], top[4]) else None,
+                    "cur": top[2], "price": round(top[3], 2) if top[2] == "GRAM" else int(top[3]), "at": top[0]} if top else None)}
+    _hist_cache[key] = (time.time(), out)
+    if len(_hist_cache) > 200:
+        _hist_cache.pop(next(iter(_hist_cache)))
+    return out
+
+
 def _clean(xs):
     """Drop sales 10× above the lower median (fake / outlier deals), as TeleFeed does."""
     xs = [x for x in xs if x and x > 0]
@@ -731,6 +822,15 @@ class H(BaseHTTPRequestHandler):
                 return self._send(400, {"error": "need c, m, b"})
             try:
                 return self._send(200, detail(c, m, b))
+            except sqlite3.Error as e:
+                return self._send(503, {"error": type(e).__name__})
+        if u.path == "/history":
+            q = urllib.parse.parse_qs(u.query)
+            c, m, b = ((q.get(k) or [""])[0][:64] for k in ("c", "m", "b"))
+            if not (c and m and b):
+                return self._send(400, {"error": "need c, m, b"})
+            try:
+                return self._send(200, sales_history(c, m, b, (q.get("slug") or [""])[0][:80]))
             except sqlite3.Error as e:
                 return self._send(503, {"error": type(e).__name__})
         if u.path == "/gift":

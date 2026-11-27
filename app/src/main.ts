@@ -477,6 +477,84 @@ function drawDeal(ctx: CanvasRenderingContext2D, d: Deal, pic: HTMLCanvasElement
 
 const comboKey = (d: Deal) => `${d.title}|${d.model}|${d.backdrop}`
 
+// ---------- sales history: tap on a deal → the last sales of this model + backdrop on every marketplace ----------
+type Hist = { items: { at: number; market: string; cur: 'STARS' | 'GRAM'; price: number; usd: number | null; num: number | null; mine: boolean }[]
+  week: number; total: number; usual_usd: number | null; top: { usd: number | null; cur: string; price: number; at: number } | null }
+const histCache = new Map<string, { at: number; v: Hist | 'loading' | 'error' }>()
+
+async function loadHistory(d: Deal) {
+  const k = d.id
+  const have = histCache.get(k)
+  if (have && have.v !== 'error' && (have.v === 'loading' || Date.now() - have.at < 60_000)) return
+  histCache.set(k, { at: Date.now(), v: 'loading' })
+  try {
+    const r = await fetch(`${API}/history?c=${encodeURIComponent(d.title)}&m=${encodeURIComponent(d.model)}&b=${encodeURIComponent(d.backdrop)}&slug=${encodeURIComponent(d.id)}`)
+    histCache.set(k, { at: Date.now(), v: r.ok ? await r.json() as Hist : 'error' })
+  } catch { histCache.set(k, { at: Date.now(), v: 'error' }) }
+  if (view === 'history' && deals[idx]?.id === d.id) paint()
+}
+
+const pad2 = (n: number) => String(n).padStart(2, '0')
+function when(ts: number) {
+  const t = new Date(ts * 1000), now = new Date()
+  const hm = `${pad2(t.getHours())}:${pad2(t.getMinutes())}`
+  if (t.toDateString() === now.toDateString()) return `today ${hm}`
+  const y = new Date(now.getTime() - 86400000)
+  if (t.toDateString() === y.toDateString()) return `yesterday ${hm}`
+  return `${pad2(t.getDate())}.${pad2(t.getMonth() + 1)}${t.getFullYear() !== now.getFullYear() ? '.' + String(t.getFullYear()).slice(2) : ''} ${hm}`
+}
+const histPrice = (cur: string, p: number) => (cur === 'STARS' ? `${num(p)} ★` : `${p < 100 ? +p.toFixed(2) : Math.round(p)} GRAM`)
+
+function drawHistory(ctx: CanvasRenderingContext2D, d: Deal, h: Hist | 'loading' | 'error' | undefined) {
+  header(ctx, `${d.title} #${d.num}`)
+  ctx.textBaseline = 'alphabetic'
+  ctx.font = `700 15px ${FONT}`; ctx.fillStyle = C.text; ctx.fillText('SALES HISTORY', 12, 56)
+  ctx.font = `500 13px ${FONT}`; ctx.fillStyle = C.dim
+  ctx.fillText(fit(ctx, `${d.model} · ${d.backdrop}`, 200), 142, 56)
+  if (!h || h === 'loading' || h === 'error') {
+    ctx.font = `600 18px ${FONT}`; ctx.fillStyle = C.text
+    ctx.fillText(h === 'error' ? 'No connection to the sales data' : 'Loading sales…', 12, 130)
+    return
+  }
+  // the summary: usual price, the top sale, how lively the market is
+  const sum: string[] = []
+  if (h.usual_usd) sum.push(`usual $${money(h.usual_usd)}`)
+  if (h.top && h.top.usd) sum.push(`top $${money(h.top.usd)}`)
+  sum.push(`${h.week} this week`)
+  ctx.font = `700 13px ${FONT}`; ctx.fillStyle = C.text
+  const st = sum.join('  ·  '), sw = ctx.measureText(st).width
+  ctx.fillText(st, W - 12 - sw, 56)
+  ctx.fillStyle = C.line; ctx.fillRect(10, 66, W - 20, 1)
+  if (!h.items.length) {
+    ctx.font = `600 16px ${FONT}`; ctx.fillStyle = C.text
+    ctx.fillText('No sales of this model + backdrop in 90 days', 12, 120)
+    ctx.font = `500 13px ${FONT}`; ctx.fillStyle = C.dim
+    ctx.fillText('A rare combination — the price is up to the seller.', 12, 144)
+    return
+  }
+  let y = 88
+  for (const it of h.items.slice(0, 7)) {
+    ctx.font = `500 13px ${FONT}`; ctx.fillStyle = C.dim; ctx.fillText(when(it.at), 12, y)
+    ctx.font = `800 15px ${FONT}`; ctx.fillStyle = C.text; ctx.fillText(histPrice(it.cur, it.price), 150, y)
+    ctx.font = `500 13px ${FONT}`; ctx.fillStyle = C.dim
+    if (it.usd) ctx.fillText(`$${money(it.usd)}`, 272, y)
+    // sold 20 %+ above this deal's price → shown bright: a resale at that level would be a profit
+    if (it.usd && d.usd && it.usd > d.usd * 1.2) {
+      ctx.font = `700 13px ${FONT}`; ctx.fillStyle = C.text; ctx.fillText(`+${Math.round((it.usd / d.usd - 1) * 100)}%`, 330, y)
+    }
+    ctx.font = `600 13px ${FONT}`; ctx.fillStyle = C.text; ctx.fillText(MARKET[it.market] || it.market, 392, y)
+    if (it.num) {
+      const t = it.mine ? `this #${it.num}` : `#${it.num}`
+      ctx.font = `600 13px ${FONT}`
+      const tw = ctx.measureText(t).width
+      if (it.mine) { rrect(ctx, W - 16 - tw - 6, y - 13, tw + 12, 18, 9); ctx.fillStyle = '#fff'; ctx.fill(); ctx.fillStyle = '#000' }
+      else ctx.fillStyle = C.dim
+      ctx.fillText(t, W - 16 - tw, y)
+    }
+    y += 23
+  }
+}
+
 async function loadDetail(d: Deal) {
   const k = comboKey(d)
   const have = detailCache.get(k)
@@ -679,7 +757,7 @@ let fresh = 0                     // new deals arrived while you were looking at
 let token = localStorage.getItem(TOKEN_KEY) || ''
 let mode: 'pair' | 'deals' = token ? 'deals' : 'pair'
 // glance → hold → card → hold → detail (chart, marketplaces) → hold → glance
-let view: 'glance' | 'card' | 'detail' = 'glance'
+let view: 'glance' | 'card' | 'detail' | 'history' = 'glance'
 let asleep = false                               // quiet by default: the lens goes dark and wakes on a matching deal
 let lastActive = Date.now()
 let animOnce = false                             // bot /settings: play the gift animation once instead of looping
@@ -750,7 +828,14 @@ function paint() {
       return c
     })
     if (!d.sold) playModel(d)
-    put(5, 'foot', tip || (d.sold ? 'tap: next deal' : `${token ? 'tap: send' : 'tap: link Telegram'}    2× tap: next    hold: more`), tip ? 4 : 1)
+    put(5, 'foot', tip || (d.sold ? 'tap: next deal' : `tap: sales    ${token ? 'hold: send' : 'hold: link Telegram'}    2× tap: next`), tip ? 4 : 1)
+    return
+  }
+  if (view === 'history') {
+    const h = histCache.get(d.id)
+    loadHistory(d)
+    show(async () => { const { c, ctx } = blank(); drawHistory(ctx, d, h?.v); return c })
+    put(5, 'foot', tip || `tap: back    ${token ? 'hold: send' : 'hold: link Telegram'}    2× tap: next`, tip ? 4 : 1)
     return
   }
   if (view === 'detail') {
@@ -873,7 +958,7 @@ async function watchCurrent() {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token, item: d }),
     })
     if (r.ok) { watched.add(d.id); toast('Watching — the bot will write if it gets cheaper or is sold') } else toast('Could not set the watch')
-  } catch { toast('No connection. Tap to retry.') }
+  } catch { toast('No connection. Hold to retry.') }
 }
 
 async function sendCurrent() {
@@ -886,8 +971,8 @@ async function sendCurrent() {
     const r = await fetch(`${API}/send`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token, item: d }),
     })
-    if (r.status === 403) { token = ''; localStorage.removeItem(TOKEN_KEY); toast('Link expired. Tap to link again.'); return }
-    if (!r.ok) { toast('Could not send. Tap to retry.'); return }
+    if (r.status === 403) { token = ''; localStorage.removeItem(TOKEN_KEY); toast('Link expired. Hold to link again.'); return }
+    if (!r.ok) { toast('Could not send. Hold to retry.'); return }
     toastUntil = 0
     confirmDeal = d; confirmUntil = Date.now() + 2200; paint()
     setTimeout(() => {                                  // then straight to the next deal
@@ -895,7 +980,7 @@ async function sendCurrent() {
       if (deals[idx]?.id === d.id && idx < deals.length - 1) idx++
       paint()
     }, 2300)
-  } catch { toast('No connection. Tap to retry.') }
+  } catch { toast('No connection. Hold to retry.') }
 }
 
 // ---------- input ----------
@@ -912,8 +997,8 @@ bridge.onEvenHubEvent((event) => {
   if (asleep && mode === 'deals') {                   // any touch wakes the lens — show the freshest deal, do nothing else
     asleep = false; view = 'glance'; idx = 0; fresh = 0; paint(); return
   }
-  if (is(OsEventTypeList.LONG_PRESS_EVENT)) {          // hold: glance → card → chart → glance
-    if (mode === 'deals' && deals.length) { view = view === 'glance' ? 'card' : view === 'card' ? 'detail' : 'glance'; paint() }
+  if (is(OsEventTypeList.LONG_PRESS_EVENT)) {          // hold: send the deal to Telegram (from the glance or the sales history)
+    if (mode === 'deals' && deals.length) sendCurrent()
     return
   }
   if (is(OsEventTypeList.DOUBLE_CLICK_EVENT)) {          // double tap: next deal (wraps to the freshest); no deals — exit
@@ -934,7 +1019,13 @@ bridge.onEvenHubEvent((event) => {
   if (sysType === OsEventTypeList.CLICK_EVENT || textType === OsEventTypeList.CLICK_EVENT) {
     if (mode === 'pair') { mode = 'deals'; paint(); return }   // skip linking: view only
     if (view === 'detail') { watchCurrent(); return }
-    sendCurrent()
+    if (mode === 'deals' && deals.length) {          // tap: the deal <-> its sales history (back to the same deal)
+      const d = deals[Math.min(idx, deals.length - 1)]
+      if (d.sold && view === 'glance') { idx = idx < deals.length - 1 ? idx + 1 : 0; paint(); return }
+      view = view === 'history' ? 'glance' : 'history'
+      if (view === 'history') loadHistory(d)
+      paint(); return
+    }
   }
 })
 
@@ -944,6 +1035,6 @@ poll()
 setInterval(poll, POLL_MS)
 setInterval(() => {
   if (mode !== 'deals') return
-  if (!asleep && !confirmDeal && view !== 'detail' && Date.now() - lastActive > AWAKE_MS) { asleep = true; paint(); return }
+  if (!asleep && !confirmDeal && view !== 'detail' && view !== 'history' && Date.now() - lastActive > AWAKE_MS) { asleep = true; paint(); return }
   if (deals.length && !asleep && !drawing) paint()                 // timer ticks, HOT blinks
 }, 500)   // 'listed Ns ago' ticks
