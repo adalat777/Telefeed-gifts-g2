@@ -17,6 +17,8 @@ type Deal = {
   id: string; title: string; num: number; model: string; backdrop: string; pattern?: string
   price: number; cur: 'STARS' | 'GRAM'; usd: number | null; x: number; floor: number | null; cheapest?: boolean
   typical: number | null; max: number | null; sales: number | null; market: string; url: string | null; seen_s: number
+  resell?: { sell: number; net: number; cost_usd: number; get_usd: number; profit_usd: number } | null
+  sold?: boolean
 }
 
 const API = (import.meta.env.VITE_API as string | undefined) || 'http://localhost:8090'
@@ -52,7 +54,11 @@ await bridge.createStartUpPageContainer(new CreateStartUpPageContainer(page))
 // After an app reload the glasses keep the old page — rebuild it so every container exists.
 await bridge.rebuildPageContainer(new RebuildPageContainer(page))
 
+const putLast = new Map<number, string>()
 function put(id: number, name: string, content: string, textColor?: number) {
+  const k = `${content}|${textColor}`
+  if (putLast.get(id) === k) return                  // the timer repaints every second — don't resend the same text
+  putLast.set(id, k)
   bridge.textContainerUpgrade(new TextContainerUpgrade({ containerID: id, containerName: name, content, textColor }))
 }
 
@@ -207,6 +213,7 @@ function fit(ctx: CanvasRenderingContext2D, text: string, max: number) {
   while (text.length > 1 && ctx.measureText(text + '…').width > max) text = text.slice(0, -1)
   return text + '…'
 }
+const money = (v: number) => (v < 100 ? v.toFixed(2).replace(/\.00$/, '') : String(Math.round(v)))
 const xs = (x: number) => x.toFixed(2).replace(/\.?0+$/, '')   // 2.00 → 2, 2.10 → 2.1, 2.22 → 2.22
 const usd = (v: number | null) => (v == null ? '' : `≈ $${v < 100 ? v.toFixed(2).replace(/\.00$/, '') : Math.round(v)}`)
 const priceText = (d: Deal) => (d.cur === 'STARS' ? `${num(d.price)} ★` : `${d.price < 100 ? d.price : Math.round(d.price)} GRAM`)
@@ -257,17 +264,29 @@ function drawDeal(ctx: CanvasRenderingContext2D, d: Deal, pic: HTMLCanvasElement
 
   // ---- why it is a deal (right side) ----
   const rx = 242
-  ctx.font = `600 12px ${FONT}`; ctx.fillStyle = C.dim; ctx.fillText('UNDERPRICED', rx, 62)
-  ctx.font = `800 46px ${FONT}`; ctx.fillStyle = '#fff'
-  const big = `↗ ${xs(d.x)}×`; ctx.fillText(big, rx - 2, 108)
-  ctx.font = `500 13px ${FONT}`; ctx.fillStyle = C.dim; ctx.fillText('vs the top sale of this model + backdrop', rx, 128)
+  const rs = d.resell && d.resell.profit_usd > 0.5 ? d.resell : null
+  ctx.textBaseline = 'alphabetic'
+  if (rs) {
+    // the money hook: what you could make if you resell at the usual price (estimate, after the 20 % fee)
+    ctx.font = `600 12px ${FONT}`; ctx.fillStyle = C.dim; ctx.fillText('RESELL ESTIMATE', rx, 62)
+    ctx.font = `800 46px ${FONT}`; ctx.fillStyle = '#fff'
+    ctx.fillText(`+$${money(rs.profit_usd)}`, rx - 2, 108)
+    ctx.font = `500 13px ${FONT}`; ctx.fillStyle = C.dim
+    ctx.fillText(fit(ctx, `sell ~${num(rs.sell)} ★ → you get ~$${money(rs.get_usd)} (−20%)`, W - rx - 12), rx, 128)
+  } else {
+    ctx.font = `600 12px ${FONT}`; ctx.fillStyle = C.dim; ctx.fillText('UNDERPRICED', rx, 62)
+    ctx.font = `800 46px ${FONT}`; ctx.fillStyle = '#fff'
+    ctx.fillText(`↗ ${xs(d.x)}×`, rx - 2, 108)
+    ctx.font = `500 13px ${FONT}`; ctx.fillStyle = C.dim; ctx.fillText('vs the top sale of this model + backdrop', rx, 128)
+  }
   ctx.fillStyle = C.line; ctx.fillRect(rx, 142, W - rx - 12, 1)
+  const usual: [string, string] = d.floor ? ['Floor', `${num(d.floor)} ★`]
+    : d.cheapest ? ['Floor', 'cheapest on sale']
+    : d.typical ? ['Usual', `${num(Math.round(d.typical))} ★` + (d.sales ? ` · ${d.sales} sales` : '')] : ['Floor', 'no other listings']
   const rows: [string, string][] = [
-    d.floor ? ['Floor', `${num(d.floor)} ★`]
-      : d.cheapest ? ['Floor', 'cheapest on sale']
-      : d.typical ? ['Usual', `${num(Math.round(d.typical))} ★ per sale`] : ['Floor', 'no other listings'],
-    ['Sales', d.sales ? `${d.sales} of this model + backdrop` : '—'],
-    ['Listed', `${ago(d.seen_s)} · ${MARKET[d.market] || d.market}`],
+    rs ? ['Deal', `↗ ${xs(d.x)}× vs top sale`] : ['Sales', d.sales ? `${d.sales} of this model + backdrop` : '—'],
+    usual,
+    ['Listed', `${ago(liveAge(d))} · ${MARKET[d.market] || d.market}`],
   ]
   let ry = 164
   for (const [k, v] of rows) {
@@ -276,11 +295,28 @@ function drawDeal(ctx: CanvasRenderingContext2D, d: Deal, pic: HTMLCanvasElement
     ry += 22
   }
   // button like "Buy" in the app
-  const label = token ? 'Tap — send to Telegram' : 'Tap — link Telegram'
+  const label = d.sold ? 'Tap — next deal' : token ? 'Tap — send to Telegram' : 'Tap — link Telegram'
   ctx.font = `700 14px ${FONT}`
   const bw = ctx.measureText(label).width + 28
   rrect(ctx, rx, 222, bw, 26, 13); ctx.fillStyle = '#e8e8e8'; ctx.fill()
   ctx.fillStyle = '#000'; ctx.textBaseline = 'middle'; ctx.fillText(label, rx + 14, 235.5); ctx.textBaseline = 'alphabetic'
+  if (d.sold) {                                       // someone was faster — stamp it
+    ctx.save()
+    rrect(ctx, cx + 1, cy + 1, cw - 2, ch - 2, 13); ctx.fillStyle = '#000'; ctx.fill()
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
+    ctx.save()
+    ctx.translate(cx + cw / 2, cy + 74); ctx.rotate(-0.16)
+    ctx.strokeStyle = '#fff'; ctx.lineWidth = 3
+    rrect(ctx, -74, -27, 148, 54, 8); ctx.stroke()
+    ctx.fillStyle = '#fff'; ctx.font = `900 36px ${FONT}`; ctx.fillText('SOLD', 0, 2)
+    ctx.restore()
+    ctx.font = `700 14px ${FONT}`; ctx.fillStyle = C.text
+    ctx.fillText(fit(ctx, `${d.title} #${d.num}`, cw - 20), cx + cw / 2, cy + 142)
+    ctx.font = `500 13px ${FONT}`; ctx.fillStyle = C.dim
+    ctx.fillText('someone was faster', cx + cw / 2, cy + 164)
+    ctx.fillText('next deal in a moment…', cx + cw / 2, cy + 184)
+    ctx.restore()
+  }
 }
 
 function drawMessage(ctx: CanvasRenderingContext2D, right: string, title: string, lines: string[], big?: string) {
@@ -337,6 +373,10 @@ let mode: 'pair' | 'deals' = token ? 'deals' : 'pair'
 let pairCode = ''
 let toastUntil = 0
 let toastText = ''
+let pollAt = Date.now()            // when the deals were fetched — the 'listed Ns ago' timer ticks from here
+let confirmUntil = 0               // the full-screen 'Sent to Telegram' confirmation
+let confirmDeal: Deal | null = null
+const liveAge = (d: Deal) => d.seen_s + Math.floor((Date.now() - pollAt) / 1000)
 
 const num = (n: number) => n.toLocaleString('en-US').replace(/,/g, ' ')
 function ago(s: number) {
@@ -367,6 +407,12 @@ function paint() {
     put(5, 'foot', tip || '2× tap: exit', tip ? 4 : 1)
     return
   }
+  if (confirmDeal && Date.now() < confirmUntil) {
+    const cd = confirmDeal
+    show(async () => { const { c, ctx } = blank(); drawConfirm(ctx, cd); return c })
+    put(5, 'foot', tip || 'swipe: next    2× tap: exit', tip ? 4 : 1)
+    return
+  }
   const d = deals[Math.min(idx, total - 1)]
   const pos = `${idx === 0 && d.seen_s < 120 ? 'NEW · ' : ''}deal ${idx + 1}/${total}` + (fresh ? ` · +${fresh} new` : ' · live')
   show(async () => {
@@ -384,15 +430,43 @@ function toast(t: string, ms = 2500) {
 }
 
 // ---------- data ----------
+function markSold(d: Deal) {
+  d.sold = true
+  setTimeout(() => {                                   // after 3 s the next deal takes its place
+    const j = deals.indexOf(d)
+    if (j >= 0) deals.splice(j, 1)
+    if (idx >= deals.length) idx = Math.max(0, deals.length - 1)
+    paint()
+  }, 3000)
+}
+
+function drawConfirm(ctx: CanvasRenderingContext2D, d: Deal) {
+  header(ctx, 'sent')
+  ctx.strokeStyle = '#fff'; ctx.lineWidth = 6; ctx.lineCap = 'round'; ctx.lineJoin = 'round'
+  ctx.beginPath(); ctx.arc(110, 146, 62, 0, Math.PI * 2); ctx.stroke()
+  ctx.beginPath(); ctx.moveTo(80, 148); ctx.lineTo(102, 170); ctx.lineTo(142, 124); ctx.stroke()
+  ctx.textBaseline = 'alphabetic'
+  ctx.font = `800 30px ${FONT}`; ctx.fillStyle = '#fff'; ctx.fillText('Sent to Telegram', 206, 112)
+  ctx.font = `600 16px ${FONT}`; ctx.fillStyle = C.text; ctx.fillText(fit(ctx, `${d.title} #${d.num} · ${priceText(d)}`, W - 220), 206, 146)
+  ctx.font = `500 14px ${FONT}`; ctx.fillStyle = C.dim
+  ctx.fillText('Open it on your phone and buy in two taps.', 206, 176)
+  ctx.fillText('Next deal in a moment…', 206, 200)
+}
+
 async function poll() {
   try {
     const r = await fetch(`${API}/signals?limit=20&minutes=60`)
     if (!r.ok) throw new Error(String(r.status))
-    const data = await r.json() as { items: Deal[] }
+    const data = await r.json() as { items: Deal[]; gone?: string[] }
+    const goneSet = new Set(data.gone || [])
     const known = new Set(deals.map((d) => d.id))
-    const added = data.items.filter((d) => !known.has(d.id)).length
-    const cur = deals[idx]?.id
-    deals = data.items
+    const curDeal = deals[idx]
+    if (curDeal && !curDeal.sold && goneSet.has(curDeal.id)) markSold(curDeal)   // the one you look at was just bought
+    const items = data.items.filter((d) => !goneSet.has(d.id))
+    const added = items.filter((d) => !known.has(d.id)).length
+    const cur = curDeal?.id
+    pollAt = Date.now()
+    deals = curDeal?.sold ? [curDeal, ...items.filter((d) => d.id !== curDeal.id)] : items
     if (idx > 0 && cur) {                         // keep your place while you browse older deals
       const j = deals.findIndex((d) => d.id === cur)
       idx = j >= 0 ? j : 0
@@ -436,6 +510,7 @@ async function startPairing() {
 async function sendCurrent() {
   const d = deals[idx]
   if (!d) return
+  if (d.sold) { if (idx < deals.length - 1) idx++; paint(); return }   // it is gone — go to the next one
   if (!token) { startPairing(); return }
   toast('Sending to Telegram...', 4000)
   try {
@@ -443,7 +518,14 @@ async function sendCurrent() {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token, item: d }),
     })
     if (r.status === 403) { token = ''; localStorage.removeItem(TOKEN_KEY); toast('Link expired. Tap to link again.'); return }
-    toast(r.ok ? `Sent: ${d.title} #${d.num} -> Telegram` : 'Could not send. Tap to retry.')
+    if (!r.ok) { toast('Could not send. Tap to retry.'); return }
+    toastUntil = 0
+    confirmDeal = d; confirmUntil = Date.now() + 2200; paint()
+    setTimeout(() => {                                  // then straight to the next deal
+      confirmDeal = null
+      if (deals[idx]?.id === d.id && idx < deals.length - 1) idx++
+      paint()
+    }, 2300)
   } catch { toast('No connection. Tap to retry.') }
 }
 
@@ -474,3 +556,4 @@ paint()
 if (mode === 'pair') startPairing()
 poll()
 setInterval(poll, POLL_MS)
+setInterval(() => { if (mode === 'deals' && deals.length && !drawing) paint() }, 1000)   // 'listed Ns ago' ticks

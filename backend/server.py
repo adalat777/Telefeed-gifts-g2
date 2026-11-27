@@ -231,12 +231,17 @@ def signals(limit=20, minutes=60):
     try:
         r = db.execute("SELECT usd FROM ton_usd ORDER BY day DESC LIMIT 1").fetchone()
         usd_rate = float(r[0]) if r else None
-        rows = db.execute("SELECT data, best_upside, last_at FROM profitable WHERE status='sale' AND last_at >= ? "
-                          "ORDER BY last_at DESC LIMIT ?", (time.time() - minutes * 60, limit)).fetchall()
+        since = time.time() - minutes * 60
+        rows = db.execute("SELECT data, best_upside, last_at, status FROM profitable WHERE status='sale' AND last_at >= ? "
+                          "ORDER BY last_at DESC LIMIT ?", (since, limit)).fetchall()
+        # deals that were sold / taken off in the last 10 minutes — so the glasses can stamp them SOLD
+        gone = [r[0] for r in db.execute(
+            "SELECT key FROM profitable WHERE status IN ('sold','gone','off') AND status_at >= ? AND last_at >= ? LIMIT 200",
+            (time.time() - 600, since)).fetchall()]
     finally:
         db.close()
     items = []
-    for raw, best, last in rows:
+    for raw, best, last, status in rows:
         try:
             d = json.loads(raw)
         except ValueError:
@@ -261,10 +266,33 @@ def signals(limit=20, minutes=60):
             "max": h.get("max_stars"), "sales": h.get("sales"), "market": d.get("market") or "telegram",
             "url": d.get("url") or (f"https://t.me/nft/{d['slug']}" if d.get("slug") else None),
             "seen_s": int(time.time() - last),
+            "resell": resell(d, h, res, usd_rate),
         })
-    out = {"now": int(time.time()), "items": items}
+    out = {"now": int(time.time()), "items": items, "gone": gone}
     _cache[key] = (time.time(), out)
     return out
+
+
+STAR_OUT_USD = 0.013        # what a Star is worth when you withdraw
+SELL_FEE = 0.2              # Telegram Market fee when you sell for Stars
+
+
+def resell(d, h, res, usd_rate):
+    """Estimate: resell in Telegram for Stars at the usual price → what you get after the fee, and the profit in $."""
+    sell = res.get("sell") or (h.get("typical") and round(h["typical"] * 0.98))
+    if not sell:
+        return None
+    net = res.get("net") or round(sell * (1 - SELL_FEE))
+    costs = []
+    if d.get("stars") and not d.get("ton_only") and d.get("market") in (None, "telegram"):
+        costs.append(d["stars"] * STAR_USD)
+    if d.get("ton") and usd_rate:
+        costs.append(d["ton"] * usd_rate)
+    if not costs:
+        return None
+    cost, get = min(costs), net * STAR_OUT_USD
+    return {"sell": int(sell), "net": int(net), "cost_usd": round(cost, 2), "get_usd": round(get, 2),
+            "profit_usd": round(get - cost, 2)}
 
 
 MARKET = {"telegram": "Telegram Market", "onchain": "on-chain (Market App)", "mrkt": "MRKT", "portals": "Portals",
@@ -279,7 +307,11 @@ def deal_text(it):
              f"{it.get('model')} · {it.get('backdrop')}" + (f" · {it['pattern']}" if it.get("pattern") else ""),
              f"💰 {price}{usd} on {MARKET.get(it.get('market'), it.get('market'))}",
              f"📈 ×{it.get('x')} vs. the top sale of this model + backdrop" + (f" · floor {it['floor']} ⭐" if it.get("floor") else (" · cheapest on sale" if it.get("cheapest") else "")),
-             "", "Sent from your Even G2 · TeleGift Glance. Data, not financial advice."]
+             ]
+    rs = it.get("resell") or {}
+    if rs.get("profit_usd") and rs["profit_usd"] > 0.5:
+        lines.append(f"💵 Resell estimate: sell ~{rs['sell']} ⭐ → you get ~${rs['get_usd']} (−20%) · +${rs['profit_usd']}")
+    lines += ["", "Sent from your Even G2 · TeleGift Glance. Data, not financial advice."]
     return "\n".join(lines)
 
 
