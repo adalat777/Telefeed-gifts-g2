@@ -298,3 +298,20 @@ class TestOpenInTeleFeed(unittest.TestCase):
             self.assertIsNone(server.app_button("PlushPepe-412"))
         finally:
             server.MINIAPP_URL = old
+
+
+class TestInline(unittest.TestCase):
+    def test_inline_matches_words_and_sorts_by_x(self):
+        items = [
+            {"id": "PlushPepe-412", "title": "Plush Pepe", "num": 412, "model": "Aqua", "backdrop": "Black", "x": 2.1,
+             "price": 900, "cur": "STARS", "usd": 13.5, "market": "telegram"},
+            {"id": "PlushPepe-7", "title": "Plush Pepe", "num": 7, "model": "Ruby", "backdrop": "Onyx Black", "x": 4.0,
+             "price": 5, "cur": "GRAM", "market": "mrkt"},
+            {"id": "ViceCream-1", "title": "Vice Cream", "num": 1, "model": "Iceman", "backdrop": "Black", "x": 9,
+             "price": 100, "cur": "STARS", "market": "telegram", "sold": True},
+        ]
+        r = server.inline_results("plush black", items)
+        self.assertEqual([x["id"] for x in r], ["PlushPepe-7", "PlushPepe-412"])
+        self.assertIn("https://t.me/nft/PlushPepe-7", r[0]["input_message_content"]["message_text"])
+        self.assertEqual(server.inline_results("#412", items)[0]["id"], "PlushPepe-412")
+        self.assertEqual(len(server.inline_results("", items)), 2)          # sold lots are not offered

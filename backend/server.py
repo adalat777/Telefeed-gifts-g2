@@ -249,9 +249,63 @@ def relay(u):
         return False
 
 
+# 27.11 inline mode (owner): in any chat "@telefeedgifts_ai plush pepe" → the freshest underpriced lots that match
+# (collection / model / backdrop / pattern / number), best "×" first; picking one sends the deal card with buttons.
+# Needs inline mode switched on for the bot in @BotFather (/setinline). Empty query — the best deals right now.
+INLINE_MAX = 20
+MINIAPP_SHORT = os.environ.get("MINIAPP_SHORT", "")      # Mini App short name from @BotFather /newapp (t.me/<bot>/<short>)
+
+
+def inline_results(query, items):
+    words = [w for w in re.split(r"\s+", (query or "").lower().replace("#", " ")) if w]
+    hits = []
+    for it in items:
+        if it.get("sold"):
+            continue
+        hay = " ".join(str(it.get(k) or "") for k in ("title", "model", "backdrop", "pattern", "num")).lower()
+        if all(w in hay for w in words):
+            hits.append(it)
+    hits.sort(key=lambda it: -(it.get("x") or 0))
+    out = []
+    for it in hits[:INLINE_MAX]:
+        slug = str(it.get("id") or "")
+        if not re.fullmatch(r"[A-Za-z0-9]+-\d{1,9}", slug):
+            continue
+        price = f"{it.get('price')} {'⭐' if it.get('cur') == 'STARS' else 'GRAM'}"
+        usd = f" ≈${it['usd']}" if it.get("usd") else ""
+        row = [{"text": "🎁 Open gift", "url": f"https://t.me/nft/{slug}"}]
+        if MINIAPP_SHORT and bot_name():
+            row.append({"text": "📱 TeleFeed", "url": f"https://t.me/{bot_name()}/{MINIAPP_SHORT}?startapp=gift_{slug}"})
+        out.append({
+            "type": "article", "id": slug[:64],
+            "title": f"{it.get('title')} #{it.get('num')} · ↗ {it.get('x')}×",
+            "description": f"{price}{usd} · {MARKET.get(it.get('market'), it.get('market'))} · {it.get('model')} · {it.get('backdrop')}",
+            "thumbnail_url": f"https://nft.fragment.com/gift/{slug.lower()}.small.jpg",
+            "input_message_content": {"message_text": deal_text(it, "via TeleGift · data, not financial advice")
+                                      + f"\nhttps://t.me/nft/{slug}"},
+            "reply_markup": {"inline_keyboard": [row]},
+        })
+    return out
+
+
+def on_inline(q):
+    try:
+        items = signals(200, 24 * 60).get("items", [])
+    except Exception:
+        items = []
+    res = inline_results(q.get("query", ""), items)
+    params = {"inline_query_id": q["id"], "results": res, "cache_time": 30, "is_personal": False}
+    if not res:
+        params["button"] = {"text": "No deals match — open the bot", "start_parameter": "inline"}
+    try:
+        tg("answerInlineQuery", params, 15)
+    except Exception:
+        pass
+
+
 def bot_loop():
     offset = 0
-    kinds = ["message", "callback_query"] + (["pre_checkout_query"] if RELAY else [])
+    kinds = ["message", "callback_query", "inline_query"] + (["pre_checkout_query"] if RELAY else [])
     while True:
         try:
             res = tg("getUpdates", {"offset": offset, "timeout": 30, "allowed_updates": kinds}, timeout=40)
@@ -262,6 +316,9 @@ def bot_loop():
                     continue
                 if u.get("callback_query"):
                     on_button(u["callback_query"])
+                    continue
+                if u.get("inline_query"):
+                    on_inline(u["inline_query"])
                     continue
                 m = u.get("message") or {}
                 chat = (m.get("chat") or {}).get("id")
@@ -940,7 +997,7 @@ MARKET = {"telegram": "Telegram Market", "onchain": "on-chain (Market App)", "mr
 SAFE_URL = re.compile(r"^https://(t\.me|marketapp\.org)/")
 
 
-def deal_text(it):
+def deal_text(it, footer="Sent from your Even G2 · TeleGift Glance. Data, not financial advice."):
     price = f"{it.get('price')} {'⭐' if it.get('cur') == 'STARS' else 'GRAM'}"
     usd = f" (≈${it['usd']})" if it.get("usd") else ""
     lines = [f"🎁 {it.get('title')} #{it.get('num')}",
@@ -951,7 +1008,7 @@ def deal_text(it):
     rs = it.get("resell") or {}
     if rs.get("profit_usd") and rs["profit_usd"] > 0.5:
         lines.append(f"💵 Resell estimate: sell ~{rs['sell']} ⭐ → you get ~${rs['get_usd']} (−20%) · +${rs['profit_usd']}")
-    lines += ["", "Sent from your Even G2 · TeleGift Glance. Data, not financial advice."]
+    lines += ["", footer]
     return "\n".join(lines)
 
 
