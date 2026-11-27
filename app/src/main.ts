@@ -51,7 +51,7 @@ const tiles = TILES.map((t) => new ImageContainerProperty({
   xPosition: t.x, yPosition: t.y, width: t.w, height: t.h, containerID: t.id, containerName: t.name,
 }))
 const foot = new TextContainerProperty({
-  xPosition: 0, yPosition: H, width: 576, height: 288 - H, borderWidth: 0, borderColor: 5, paddingLength: 4,
+  xPosition: 0, yPosition: H, width: 576, height: 288 - H, borderWidth: 0, borderColor: 5, paddingLength: 0,   // no padding: see below
   containerID: 5, containerName: 'foot', content: '', isEventCapture: 1,
 })
 const page = { containerTotalNum: 5, textObject: [foot], imageObject: tiles }
@@ -983,7 +983,7 @@ function paint() {
       return c
     })
     if (!d.sold) playModel(d)
-    put(5, 'foot', tip || (d.sold ? 'tap: next deal    swipe: next' : `swipe: next   tap: info   2×: ${watched.has(d.id) ? 'watching' : 'watch'}   hold: ${token ? 'send' : 'link'}`), tip ? 4 : 1)
+    put(5, 'foot', tip || (d.sold ? 'tap: next deal    swipe: next' : `swipe up: next   tap: info   2×: ${watched.has(d.id) ? 'watching' : 'watch'}   hold: ${token ? 'send' : 'link'}`), tip ? 4 : 1)
     return
   }
   if (view === 'history') {
@@ -1000,8 +1000,8 @@ function paint() {
       return c
     })
     if (page === 0 && !d.sold) playModel(d)
-    const nextT = page < PAGES.length - 1 ? `tap: ${PAGES[page + 1].toLowerCase()}` : 'tap: back to feed'
-    put(5, 'foot', tip || `${nextT}    ${page ? 'swipe: scroll    ' : ''}2× tap: feed    ${token ? 'hold: send' : 'hold: link'}`, tip ? 4 : 1)
+    const nextT = page < PAGES.length - 1 ? `tap: ${PAGES[page + 1].toLowerCase()}` : 'tap: feed'
+    put(5, 'foot', tip || `swipe up: more   ${nextT}   2×: feed   hold: ${token ? 'send' : 'link'}`, tip ? 4 : 1)
     return
   }
   if (view === 'detail') {
@@ -1066,12 +1066,13 @@ async function poll() {
     pollAt = Date.now()
     const hot = known.size ? items.find((d) => !known.has(d.id) && d.x >= HOT_X && d.seen_s < 60) : undefined
     deals = curDeal?.sold ? [curDeal, ...items.filter((d) => d.id !== curDeal.id)] : items
+    prefetchFrames()
     const fresh1 = known.size ? items.find((d) => !known.has(d.id) && d.seen_s < 120) : undefined
     if (asleep && fresh1 && !quiet) {                  // a new matching deal wakes the lens up
       asleep = false; lastActive = Date.now(); view = 'glance'
       idx = Math.max(0, deals.indexOf(fresh1)); fresh = 0
       if (fresh1.x >= HOT_X) { hotId = fresh1.id; hotUntil = Date.now() + 10000 }
-    } else if (hot && !asleep && view !== 'detail' && !confirmDeal) {      // a very strong fresh deal jumps to the screen
+    } else if (hot && !asleep && view === 'glance' && !confirmDeal && Date.now() - lastActive > 8000) {      // a very strong fresh deal jumps to the screen
       idx = Math.max(0, deals.indexOf(hot)); fresh = 0
       hotId = hot.id; hotUntil = Date.now() + 10000
     } else if (idx > 0 && cur) {                         // keep your place while you browse older deals
@@ -1149,6 +1150,40 @@ async function sendCurrent() {
   } catch { toast('No connection. Hold to retry.') }
 }
 
+function fullRows(page: number): number {
+  const d = deals[Math.min(idx, deals.length - 1)]
+  const f = d && fullCache.get(d.id)?.v
+  if (!f || f === 'loading' || f === 'error') return 0
+  return page === 1 ? f.history.items.length : page === 2 ? f.on_sale.length + 1 : 0
+}
+function fullStep(dir: 1 | -1) {
+  const STEP = 3, rows = fullRows(fpage)
+  if (dir > 0) {
+    if (fpage > 0 && fscroll + ROWS < rows) fscroll += STEP            // more rows below on this page
+    else if (fpage < PAGES.length - 1) { fpage++; fscroll = 0 }          // next page
+    else return
+  } else {
+    if (fpage > 0 && fscroll > 0) fscroll = Math.max(0, fscroll - STEP)
+    else if (fpage > 0) { fpage--; fscroll = fpage ? Math.max(0, fullRows(fpage) - ROWS) : 0 }   // previous page, at its end
+    else { view = 'glance' }                                             // above GIFT: back to the feed
+  }
+  paint()
+}
+
+// the model animation of the deal on screen and the next two is prepared ahead, one at a time,
+// so it starts right away when you get there
+let prefetching = false
+async function prefetchFrames() {
+  if (prefetching) return
+  prefetching = true
+  try {
+    for (let k = 0; k < 3; k++) {
+      const d = deals[Math.min(deals.length - 1, idx + k)]
+      if (d && !d.sold) await modelFrames(d.id)
+    }
+  } finally { prefetching = false }
+}
+
 // ---------- input ----------
 function eventTypeOf(envelope?: { eventType?: OsEventTypeList }): OsEventTypeList | null {
   if (!envelope) return null
@@ -1179,13 +1214,14 @@ bridge.onEvenHubEvent((event) => {
   if (view === 'detail' && (is(OsEventTypeList.SCROLL_BOTTOM_EVENT) || is(OsEventTypeList.SCROLL_TOP_EVENT))) {
     view = 'card'; paint(); return
   }
-  if (view === 'history' && fpage > 0 && (is(OsEventTypeList.SCROLL_BOTTOM_EVENT) || is(OsEventTypeList.SCROLL_TOP_EVENT))) {
-    fscroll = Math.max(0, fscroll + (is(OsEventTypeList.SCROLL_BOTTOM_EVENT) ? 3 : -3)); paint(); return
+  // swipe UP = forward, DOWN = back (as on a phone). In the full info it is one long page: GIFT → the sales rows →
+  // ON SALE rows; back past the top of GIFT returns to the feed. In the feed it flips deals.
+  const fwd = is(OsEventTypeList.SCROLL_TOP_EVENT), back = is(OsEventTypeList.SCROLL_BOTTOM_EVENT)
+  if ((fwd || back) && view === 'history' && mode === 'deals' && deals.length) { fullStep(fwd ? 1 : -1); return }
+  if (fwd && mode === 'deals' && deals.length) {
+    idx = Math.min(deals.length - 1, idx + 1); paint(); prefetchFrames(); return
   }
-  if (is(OsEventTypeList.SCROLL_BOTTOM_EVENT) && mode === 'deals' && deals.length) {
-    idx = Math.min(deals.length - 1, idx + 1); paint(); return
-  }
-  if (is(OsEventTypeList.SCROLL_TOP_EVENT) && mode === 'deals' && deals.length) {
+  if (back && mode === 'deals' && deals.length) {
     idx = Math.max(0, idx - 1); if (idx === 0) fresh = 0; paint(); return
   }
   if (sysType === OsEventTypeList.CLICK_EVENT || textType === OsEventTypeList.CLICK_EVENT) {
