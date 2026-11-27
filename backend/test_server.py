@@ -254,6 +254,17 @@ class SettingsTest(Base):
         server.change_setting(9, "cols", ["Plush Pepe"])
         self.assertFalse(server.matches(server.settings_of(9), everything[0]))
 
+    def test_minimum_x_threshold(self):                            # owner 27.11: from how many "×" to show deals
+        server._pairs["tok"] = 9
+        it = {"x": 2.4, "market": "telegram", "title": "A"}
+        self.assertTrue(server.matches(server.settings_of(9), it))
+        server.change_setting(9, "x", "2.5")
+        self.assertFalse(server.matches(server.settings_of(9), it))
+        self.assertTrue(server.matches(server.settings_of(9), dict(it, x=3.1)))
+        self.assertIn("×2.5", server.settings_text(server.settings_of(9)))
+        server.change_setting(9, "x", "0")
+        self.assertTrue(server.matches(server.settings_of(9), it))
+
     def test_quiet_hours_across_midnight(self):
         st = {"quiet": [23, 8]}
         at = lambda h: time.mktime((2026, 11, 27, h, 30, 0, 0, 0, -1))  # noqa: E731

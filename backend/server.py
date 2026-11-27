@@ -93,6 +93,9 @@ try:
 except (OSError, ValueError):
     pass
 MIN_STEPS = [0, 2, 5, 10, 25, 50]
+# from how many "×" the glasses show a deal (owner 27.11: speed the feed up or slow it down by hand); 0 — every deal
+# of the feed (the feed itself starts at ×1.75)
+X_STEPS = [0, 2, 2.5, 3, 4, 5]
 QUIET_STEPS = [None, [23, 8], [0, 8], [22, 9]]
 ALL_MARKETS = ["telegram", "mrkt", "portals", "tonnel", "onchain"]
 
@@ -104,7 +107,7 @@ def save_settings():
 
 
 def settings_of(chat):
-    st = {"min": 0, "markets": None, "cols": None, "quiet": None, "anim": "loop"}
+    st = {"min": 0, "x": 0, "markets": None, "cols": None, "quiet": None, "anim": "loop"}
     st.update(_settings.get(str(chat)) or {})
     return st
 
@@ -123,6 +126,8 @@ def matches(st, it):
         return False
     if st.get("cols") and (it.get("title") or "").lower() not in [c.lower() for c in st["cols"]]:
         return False
+    if st.get("x") and (it.get("x") or 0) < st["x"]:
+        return False
     if st.get("min"):
         rs = it.get("resell") or {}
         if (rs.get("profit_usd") or 0) < st["min"]:
@@ -135,6 +140,7 @@ def settings_text(st):
     cols = "all" if not st.get("cols") else ", ".join(st["cols"])
     q = "off" if not st.get("quiet") else f"{st['quiet'][0]:02d}:00–{st['quiet'][1]:02d}:00"
     return ("⚙️ What your glasses show\n\n"
+            f"• Show deals from: {'×1.75 (all)' if not st.get('x') else '×' + format(st['x'], 'g')}\n"
             f"• Minimum resell profit: {'any' if not st.get('min') else '$' + str(st['min'])}\n"
             f"• Marketplaces: {mk}\n"
             f"• Collections: {cols}\n"
@@ -144,7 +150,9 @@ def settings_text(st):
 
 
 def settings_keyboard(st):
-    rows = [[{"text": ("✓ " if (st.get("min") or 0) == v else "") + ("any $" if not v else f"${v}+"), "callback_data": f"set:min:{v}"}
+    rows = [[{"text": ("✓ " if (st.get("x") or 0) == v else "") + ("all ×" if not v else f"×{format(v, 'g')}+"), "callback_data": f"set:x:{v}"}
+             for v in X_STEPS],
+            [{"text": ("✓ " if (st.get("min") or 0) == v else "") + ("any $" if not v else f"${v}+"), "callback_data": f"set:min:{v}"}
              for v in MIN_STEPS]]
     mrow = []
     for m in ALL_MARKETS:
@@ -164,6 +172,9 @@ def change_setting(chat, what, value):
     st = settings_of(chat)
     if what == "min":
         st["min"] = int(value)
+    elif what == "x":
+        v = float(value)
+        st["x"] = v if v in X_STEPS else 0
     elif what == "mk":
         cur = list(st.get("markets") or ALL_MARKETS)
         cur = [m for m in cur if m != value] if value in cur else cur + [value]
