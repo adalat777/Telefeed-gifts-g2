@@ -1,0 +1,7 @@
+node_modules/
+dist/
+*.ehpk
+backend/pairs.json
+backend/pairs.json.tmp
+__pycache__/
+.env

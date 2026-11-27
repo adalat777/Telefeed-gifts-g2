@@ -1,0 +1,16 @@
+{
+  "package_id": "com.telefeed.giftglance",
+  "edition": "202601",
+  "name": "TeleGift Glance",
+  "version": "0.1.0",
+  "min_sdk_version": "0.0.14",
+  "entrypoint": "index.html",
+  "permissions": [
+    {
+      "name": "network",
+      "desc": "Loads live underpriced Telegram Gift listings and sends a deal to your own Telegram chat via the TeleGift bot.",
+      "whitelist": ["http://localhost:8090"]
+    }
+  ],
+  "supported_languages": ["en"]
+}
