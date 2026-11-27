@@ -6,6 +6,7 @@ import {
   waitForEvenAppBridge,
   TextContainerProperty,
   CreateStartUpPageContainer,
+  RebuildPageContainer,
   TextContainerUpgrade,
   ImageContainerProperty,
   ImageRawDataUpdate,
@@ -46,6 +47,10 @@ const foot = new TextContainerProperty({
 })
 await bridge.createStartUpPageContainer(
   new CreateStartUpPageContainer({ containerTotalNum: 4, textObject: [head, body, foot], imageObject: [pic] }),
+)
+// After an app reload the glasses keep the old page — rebuild it so the picture container exists too.
+await bridge.rebuildPageContainer(
+  new RebuildPageContainer({ containerTotalNum: 4, textObject: [head, body, foot], imageObject: [pic] }),
 )
 
 function put(id: number, name: string, content: string) {
