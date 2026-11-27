@@ -39,11 +39,10 @@ const bridge = await waitForEvenAppBridge()
 // also receives the touch events.
 const W = 576, H = 256, TW = 288
 const TILES = [
-  // left column split at y=100 so the whole model (y 106..222) sits in ONE tile: an animation frame resends just t3
-  // (a tile is at most 288×144, so the left column's last 12 px, y 244..256, stay unused)
-  { id: 1, name: 't1', x: 0, y: 0, w: TW, h: 100 },
+  // the big glance model (x 10..226) lies in the left column: an animation frame resends only t1 and t3
+  { id: 1, name: 't1', x: 0, y: 0, w: TW, h: 144 },
   { id: 2, name: 't2', x: TW, y: 0, w: TW, h: 144 },
-  { id: 3, name: 't3', x: 0, y: 100, w: TW, h: 144 },
+  { id: 3, name: 't3', x: 0, y: 144, w: TW, h: H - 144 },
   { id: 4, name: 't4', x: TW, y: 144, w: TW, h: H - 144 },
 ]
 const tiles = TILES.map((t) => new ImageContainerProperty({
@@ -68,7 +67,8 @@ function put(id: number, name: string, content: string, textColor?: number) {
 
 // ---------- model picture: shading + contours, in grayscale ----------
 const modelCache = new Map<string, HTMLCanvasElement | null>()
-const MODEL_PX = 116                     // drawn pixel-for-pixel on the lens
+const MODEL_PX = 116                     // drawn pixel-for-pixel on the lens (card)
+const GLANCE_PX = 216                    // the glance: the gift almost the full height of the lens (owner 27.11)
 
 async function modelPicture(title: string, model: string, size: number): Promise<HTMLCanvasElement | null> {
   const key = `${title}|${model}|${size}`
@@ -185,7 +185,7 @@ function modelFrames(slug: string): Promise<Frames | null> {
         for (let i = 0; i < count; i++) {
           a.goToAndStop(Math.round((i * n) / count), true)
           cc.clearRect(0, 0, side, side); cc.drawImage(cv, sx, sy, side, side, 0, 0, side, side)
-          const f = lensify(crop, MODEL_PX, range)
+          const f = lensify(crop, GLANCE_PX, range)
           range = range || f.range
           out.push(f.c)
           await new Promise((res) => setTimeout(res, 0))       // let the lens keep drawing meanwhile
@@ -380,7 +380,7 @@ function drawDeal(ctx: CanvasRenderingContext2D, d: Deal, pic: HTMLCanvasElement
   header(ctx, pos)
   const hot = d.id === hotId && Date.now() < hotUntil
   // ---- gift card (like a card in the Live feed) ----
-  const cx = 10, cy = 40, cw = 214, ch = 202   // ends at y 242: the left column below y 244 is not shown
+  const cx = 10, cy = 42, cw = 214, ch = 206
   rrect(ctx, cx, cy, cw, ch, 14); ctx.fillStyle = C.card; ctx.fill()
   ctx.strokeStyle = hot && Math.floor(Date.now() / 500) % 2 ? '#fff' : C.line; ctx.lineWidth = hot ? 3 : 1; ctx.stroke()
 
@@ -581,8 +581,8 @@ function drawGlance(ctx: CanvasRenderingContext2D, d: Deal, pic: HTMLCanvasEleme
     rrect(ctx, (W - w) / 2, 6, w, 22, 11); ctx.fillStyle = '#fff'; ctx.fill()
     ctx.fillStyle = '#000'; ctx.textBaseline = 'middle'; ctx.fillText(t, (W - w) / 2 + 11, 17.5); ctx.textBaseline = 'alphabetic'
   }
-  if (pic) ctx.drawImage(pic, 14, 106)
-  const x = 150
+  if (pic) ctx.drawImage(pic, 10, 28)
+  const x = 240
   const rs = d.resell && d.resell.profit_usd > 0.5 ? d.resell : null
   ctx.fillStyle = '#fff'; ctx.font = `800 62px ${FONT}`
   ctx.fillText(rs ? `+$${money(rs.profit_usd)}` : `↗ ${xs(d.x)}×`, x - 3, 104)
@@ -727,7 +727,7 @@ function paint() {
     show(async () => {
       const { c, ctx } = blank()
       const frames = animId === d.id && animStep >= 0 ? await modelFrames(d.id) : null
-      drawGlance(ctx, d, frames ? frames[animStep] : restFrame.get(d.id) || await modelPicture(d.title, d.model, MODEL_PX), pos)
+      drawGlance(ctx, d, frames ? frames[animStep] : restFrame.get(d.id) || await modelPicture(d.title, d.model, GLANCE_PX), pos)
       return c
     })
     if (!d.sold) playModel(d)
