@@ -59,6 +59,10 @@ await bridge.createStartUpPageContainer(new CreateStartUpPageContainer(page))
 // After an app reload the glasses keep the old page — rebuild it so every container exists.
 await bridge.rebuildPageContainer(new RebuildPageContainer(page))
 
+// Gesture hints in the bottom line (owner 27.11): the first minutes — quiet capitals, then the line is empty.
+// The text container itself stays: only through it do the glasses send gestures to the app.
+const HINT_MS = 3 * 60_000, HINT_COLOR = 0, startedAt = Date.now()
+const hint = (t: string) => (Date.now() - startedAt < HINT_MS ? t.toUpperCase().replace(/ {3}/g, '  ·  ') : ' ')
 const putLast = new Map<number, string>()
 function put(id: number, name: string, content: string, textColor?: number) {
   const k = `${content}|${textColor}`
@@ -1056,7 +1060,7 @@ function paint() {
       return c
     })
     if (!d.sold) playModel(d)
-    put(5, 'foot', tip || (d.sold ? 'tap: next deal    swipe: next' : `swipe up: next   tap: info   2×: ${watched.has(d.id) ? 'watching' : 'watch'}   hold: ${token ? 'send' : 'link'}`), tip ? 4 : 1)
+    put(5, 'foot', tip || hint(d.sold ? 'tap: next deal   swipe: next' : `swipe up: next   tap: info   2×: ${watched.has(d.id) ? 'watching' : 'watch'}   hold: ${token ? 'send' : 'link'}`), tip ? 4 : HINT_COLOR)
     return
   }
   if (view === 'history') {
@@ -1075,7 +1079,7 @@ function paint() {
     if (page === 0 && !d.sold) playModel(d)
     const nextT = page < PAGES.length - 1 ? `tap: ${PAGES[page + 1].toLowerCase()}` : 'tap: feed'
     const atEnd = fpage > 0 && fullRows(fpage) > ROWS && fscroll + ROWS >= fullRows(fpage)
-    put(5, 'foot', tip || `swipe up: ${atEnd ? 'from top' : 'more'}   ${nextT}   2×: feed   hold: ${token ? 'send' : 'link'}`, tip ? 4 : 1)
+    put(5, 'foot', tip || hint(`swipe down: ${atEnd ? 'from top' : 'more'}   ${nextT}   2×: feed   hold: ${token ? 'send' : 'link'}`), tip ? 4 : HINT_COLOR)
     return
   }
   if (view === 'detail') {
@@ -1297,7 +1301,9 @@ bridge.onEvenHubEvent((event) => {
   // swipe UP = forward, DOWN = back (as on a phone). In the full info it is one long page: GIFT → the sales rows →
   // ON SALE rows; back past the top of GIFT returns to the feed. In the feed it flips deals.
   const fwd = is(OsEventTypeList.SCROLL_TOP_EVENT), back = is(OsEventTypeList.SCROLL_BOTTOM_EVENT)
-  if ((fwd || back) && view === 'history' && mode === 'deals' && deals.length) { fullStep(fwd ? 1 : -1); return }
+  // in the full info it is the other way round (owner 27.11: «список спускается свайпом вниз — так естественнее»):
+  // swipe DOWN goes deeper into the lists, UP goes back (above GIFT — to the feed)
+  if ((fwd || back) && view === 'history' && mode === 'deals' && deals.length) { fullStep(back ? 1 : -1); return }
   if (fwd && mode === 'deals' && deals.length) {
     idx = Math.min(deals.length - 1, idx + 1); paint(); prefetchFrames(); return
   }
