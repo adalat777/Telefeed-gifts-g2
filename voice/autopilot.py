@@ -112,7 +112,7 @@ def main():
     rec = None
     if record:
         try:
-            rec = subprocess.Popen(["screencapture", "-v", "-V", str(int(total + 3)), VIDEO])
+            rec = subprocess.Popen(["screencapture", "-v", "-V" + str(int(total + 3)), VIDEO])
             time.sleep(1.0)  # запись успевает начаться
         except Exception as e:
             print(f"! запись экрана не включилась ({e}) — запишите сами Cmd+Shift+5")
