@@ -1,0 +1,21 @@
+This is TeleGift Glance — underpriced Telegram Gifts, right on your Even G2 glasses.
+
+Every deal shows the price, how many times cheaper it is than the top clean sale of the same model and backdrop, how far below market it is, and who is the next cheapest seller.
+
+Swipe to flip through fresh deals. They come live from seven marketplaces: Telegram Market, MRKT, Portals, Tonnel and on-chain.
+
+Tap for the full picture. First, the gift: rarity, floors, and how many of them exist. Tap again: every sale of this model and backdrop, from every marketplace. And once more: who is selling the same gift right now.
+
+Double tap brings you back to the feed.
+
+Found a good one? Just hold. In a second, the deal lands in your own Telegram, with a big preview of the gift.
+
+Open gift — and you buy it in Telegram in two taps.
+
+Open in TeleFeed — our Telegram Mini App shows the whole market picture for this gift.
+
+And in any chat, type our bot's name and a gift, to share live deals with friends.
+
+In settings, you choose what reaches your glasses: the minimum multiplier, marketplaces and quiet hours.
+
+TeleGift Glance. Data, not financial advice.
