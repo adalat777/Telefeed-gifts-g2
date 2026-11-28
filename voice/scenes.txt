@@ -1,0 +1,13 @@
+# Одна сцена — одна строка, начинается с номера сцены из VIDEO.md.
+# [[slnc 500]] — пауза 0,5 с; [[rate 140]] — скорость (слов в минуту).
+01 [[rate 145]] This is TeleGift Glance. [[slnc 450]] Underpriced Telegram Gifts... [[slnc 250]] right on your glasses.
+02 [[rate 150]] Every deal shows the price. [[slnc 400]] And how much cheaper it is than the best sale of the same gift. [[slnc 450]] Below that: [[slnc 200]] how far under the market it sits. [[slnc 300]] And who sells it next.
+03 [[rate 150]] Swipe up. [[slnc 350]] Next deal. [[slnc 500]] Deals come live, [[slnc 200]] from Telegram Market, [[slnc 120]] MRKT, [[slnc 120]] Portals, [[slnc 120]] Tonnel, [[slnc 120]] and on-chain.
+04 [[rate 148]] Tap. [[slnc 400]] Now you see the gift itself. [[slnc 250]] Its rarity. [[slnc 150]] Its floor. [[slnc 150]] How many exist. [[slnc 700]] Tap again. [[slnc 350]] Every sale of this gift, [[slnc 150]] from every market. [[slnc 700]] And once more. [[slnc 300]] Who is selling it right now.
+05 [[rate 150]] Double tap. [[slnc 350]] You're back in the feed.
+06 [[rate 145]] Found a good one? [[slnc 400]] Just hold. [[slnc 700]] A second later, [[slnc 150]] it's in your Telegram. [[slnc 300]] With a big picture of the gift.
+07 [[rate 150]] Tap Open gift. [[slnc 350]] And you can buy it in Telegram. [[slnc 250]] Two taps.
+08 [[rate 150]] Or tap Open in TeleFeed. [[slnc 350]] Our mini app shows you the whole market.
+09 [[rate 150]] Want to share a deal? [[slnc 400]] In any chat, [[slnc 150]] type our bot's name. [[slnc 250]] And a gift.
+10 [[rate 148]] In settings, [[slnc 200]] you decide what reaches your glasses.
+11 [[rate 140]] TeleGift Glance. [[slnc 600]] Data, [[slnc 150]] not financial advice.

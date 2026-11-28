@@ -1,21 +1,37 @@
-This is TeleGift Glance — underpriced Telegram Gifts, right on your Even G2 glasses.
+This is TeleGift Glance.
 
-Every deal shows the price, how many times cheaper it is than the top clean sale of the same model and backdrop, how far below market it is, and who is the next cheapest seller.
+Underpriced Telegram Gifts... right on your glasses.
 
-Swipe to flip through fresh deals. They come live from seven marketplaces: Telegram Market, MRKT, Portals, Tonnel and on-chain.
+Every deal shows the price.
 
-Tap for the full picture. First, the gift: rarity, floors, and how many of them exist. Tap again: every sale of this model and backdrop, from every marketplace. And once more: who is selling the same gift right now.
+And how much cheaper it is than the best sale of the same gift.
 
-Double tap brings you back to the feed.
+Below that: how far under the market it sits. And who sells it next.
 
-Found a good one? Just hold. In a second, the deal lands in your own Telegram, with a big preview of the gift.
+Swipe up. Next deal.
 
-Open gift — and you buy it in Telegram in two taps.
+Deals come live, from Telegram Market, MRKT, Portals, Tonnel, and on-chain.
 
-Open in TeleFeed — our Telegram Mini App shows the whole market picture for this gift.
+Tap. Now you see the gift itself. Its rarity. Its floor. How many exist.
 
-And in any chat, type our bot's name and a gift, to share live deals with friends.
+Tap again. Every sale of this gift, from every market.
 
-In settings, you choose what reaches your glasses: the minimum multiplier, marketplaces and quiet hours.
+And once more. Who is selling it right now.
 
-TeleGift Glance. Data, not financial advice.
+Double tap. You're back in the feed.
+
+Found a good one? Just hold.
+
+A second later, it's in your Telegram. With a big picture of the gift.
+
+Tap Open gift. And you can buy it in Telegram. Two taps.
+
+Or tap Open in TeleFeed. Our mini app shows you the whole market.
+
+Want to share a deal? In any chat, type our bot's name. And a gift.
+
+In settings, you decide what reaches your glasses.
+
+TeleGift Glance.
+
+Data, not financial advice.
