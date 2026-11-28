@@ -181,7 +181,9 @@ class HttpTest(Base):
             server.MINIAPP_URL = old
         method, p = self.tg.calls[-1]
         self.assertEqual(method, "sendMessage")
-        self.assertTrue(p["text"].startswith("https://telefeed.example/api/g/MirageLamp-35247"))
+        # 28.11: in the text — the Mini App link (anyone can open it), the big preview — from our gift page
+        self.assertRegex(p["text"], r"^https://t\.me/[A-Za-z0-9_]+/[A-Za-z0-9_]+\?startapp=gift_MirageLamp-35247")
+        self.assertNotIn("telefeed.example/api/g/", p["text"])
         self.assertEqual(p["link_preview_options"], {"url": "https://telefeed.example/api/g/MirageLamp-35247",
                                                      "prefer_large_media": True, "show_above_text": True})
 
@@ -374,3 +376,24 @@ class RefLinkTest(unittest.TestCase):
         server.TELEFEED_API = "http://127.0.0.1:9"                       # nothing listens there
         self.assertEqual(server.gift_link("PlushPepe-1", 777), "https://tf.example/api/g/PlushPepe-1")
         self.assertEqual(server.gift_link("PlushPepe-1"), "https://tf.example/api/g/PlushPepe-1")
+
+
+class AppLinkTest(unittest.TestCase):
+    def test_app_link_opens_mini_app_with_sender_code(self):
+        saved = (server._bot_name, server.MINIAPP_SHORT, dict(server._refs))
+        try:
+            server._bot_name, server.MINIAPP_SHORT = "telefeedgifts_ai_bot", "app"
+            server._refs.clear()
+            server._refs[555] = "ab12cd34"
+            self.assertEqual(server.app_link("MoodPack-92505", 555),
+                             "https://t.me/telefeedgifts_ai_bot/app?startapp=gift_MoodPack-92505_ref_ab12cd34")
+            server._refs.clear()
+            server.TELEFEED_API, old = "http://127.0.0.1:9", server.TELEFEED_API
+            try:
+                self.assertEqual(server.app_link("MoodPack-92505", 777),
+                                 "https://t.me/telefeedgifts_ai_bot/app?startapp=gift_MoodPack-92505")
+            finally:
+                server.TELEFEED_API = old
+        finally:
+            server._bot_name, server.MINIAPP_SHORT = saved[0], saved[1]
+            server._refs.clear(); server._refs.update(saved[2])

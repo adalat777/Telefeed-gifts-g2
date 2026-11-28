@@ -888,6 +888,17 @@ def gift_link(slug, chat=None):
     return f"{MINIAPP_URL}/api/g/{slug}" + (f"?r={code}" if code else "")
 
 
+def app_link(slug, chat=None):
+    """28.11 owner: the link people see (and forward) opens the TeleFeed Mini App on the gift for ANYONE (t.me/<bot>/<app>),
+    with the sender's referral code; the big picture preview comes from gift_link (link_preview_options)."""
+    short = MINIAPP_SHORT or "app"
+    name = bot_name()
+    if not slug or not name:
+        return None
+    code = ref_code(chat)
+    return f"https://t.me/{name}/{short}?startapp=gift_{slug}" + (f"_ref_{code}" if code else "")
+
+
 def app_button(slug):
     """Inline button that opens TeleFeed as a Mini App on the gift (private chats only — that's where the bot writes)."""
     if not MINIAPP_URL.startswith("https://") or not slug or not re.fullmatch(r"[A-Za-z0-9]+-\d{1,9}", slug):
@@ -1271,7 +1282,9 @@ class H(BaseHTTPRequestHandler):
             try:
                 link = gift_link(slug, chat)
                 if link:   # 28.11 owner: our gift link with a rich preview (big gift picture above, name, price) → TeleFeed
-                    params = {"chat_id": chat, "text": f"{link}\n\n{deal_text(it)}",
+                    # in the text — the Mini App link (opens the app for anyone who gets the message), preview — from our page
+                    shown = app_link(slug, chat) or link
+                    params = {"chat_id": chat, "text": f"{shown}\n\n{deal_text(it)}",
                               "link_preview_options": {"url": link, "prefer_large_media": True, "show_above_text": True}}
                     if markup:
                         params["reply_markup"] = markup
