@@ -316,21 +316,29 @@ async function playModel(d: Deal) {
   animated.add(d.id)
   const frames = await modelFrames(d.id)
   if (!frames) return                                          // no animation: stays marked, the still picture is used
+  // 28.11 owner «make it smooth, no glitches»: start only when EVERY frame is ready (the still picture stays meanwhile) —
+  // playing while in-between frames were still missing repeated frames at random and looked jerky
+  while (frames.some((f) => !f) && deals[idx]?.id === d.id && animView() && !asleep) await new Promise((res) => setTimeout(res, 50))
   if (deals[idx]?.id !== d.id || !animView() || asleep) { animated.delete(d.id); return }
   animId = d.id
   // loops without a stop while this deal is on the glance; leaves → stops (and starts again when you come back)
-  const dur = frames.dur || 3000, start = performance.now()
-  let shown = 0
+  // A steady pace: the lens takes ~N ms per frame, so we step through the frames with ONE fixed stride (every frame,
+  // every 2nd…) at an even rhythm, instead of jumping to "whatever frame the clock says" — that made uneven jumps.
+  const dur = frames.dur || 3000, frameMs = dur / frames.length, start = performance.now()
+  let shown = 0, stride = 1, i = 0, costMs = frameMs
   for (;;) {
     if (deals[idx]?.id !== d.id || !animView() || asleep || (confirmDeal && Date.now() < confirmUntil)) break
     if (animOnce && performance.now() - start >= dur) break      // the user chose "once" in the bot's /settings
-    const el = (performance.now() - start) % dur
-    let i = Math.min(frames.length - 1, Math.floor((el / dur) * frames.length))
-    while (i > 0 && !frames[i]) i--                                // in-between frames still being prepared
-    if (i === animStep) { await new Promise((res) => setTimeout(res, 8)); continue }
+    const t0 = performance.now()
     animStep = i; paint(); shown++
     await new Promise((res) => setTimeout(res, 0))
-    while (drawing) await new Promise((res) => setTimeout(res, 8))      // wait until this frame is on the lens
+    while (drawing) await new Promise((res) => setTimeout(res, 4))      // wait until this frame is on the lens
+    costMs = 0.8 * costMs + 0.2 * (performance.now() - t0)              // how long the lens takes per frame
+    if (i + stride >= frames.length)                                     // a new loop: pick the stride the lens can keep up with
+      stride = Math.max(1, Math.min(4, Math.ceil(costMs / frameMs)))
+    const wait = stride * frameMs - (performance.now() - t0)
+    if (wait > 0) await new Promise((res) => setTimeout(res, wait))
+    i = (i + stride) % frames.length
   }
   console.log('anim fps', ((1000 * shown) / (performance.now() - start)).toFixed(1), 'of', ((1000 * frames.length) / dur).toFixed(1))
   animated.delete(d.id)
@@ -1406,7 +1414,7 @@ async function prefetchFrames() {
     for (let k = 0; k < PREFETCH_AHEAD; k++) {     // 28.11 owner: «after Up the gift thinks long» — ready before you swipe
       const d = deals[Math.min(deals.length - 1, idx + k)]
       if (d && !d.sold) await modelFrames(d.id)
-      if (d && !d.sold && k < 3) loadFull(d)
+      if (d && !d.sold) loadFull(d)
     }
   } finally { prefetching = false }
 }
