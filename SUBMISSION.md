@@ -36,15 +36,18 @@ walking, or during a meeting.
    Swipe up / down to flip deals. **Tap** opens the full info: GIFT (rarity, floors, how many exist), SALES (all sales of
    this model + backdrop from every marketplace, this gift's own sales highlighted) and ON SALE (the competition right now).
 4. **Write — one gesture:** **hold** — our Telegram bot @telefeedgifts_ai_bot sends this deal to your own Telegram chat
-   with the gift picture and buttons **Open gift**, **Price chart**, **Watch**. You buy in Telegram — two taps.
+   as a link with a large gift preview and buttons **Open gift**, **Open in TeleFeed**, **Price chart**, **Watch**. You buy in Telegram — two taps.
    **Double tap** — watch the lot: the bot writes when it gets cheaper or is sold.
 5. Pairing takes one step: the glasses show a 6-digit code, you send it to the bot. No logins and no passwords on the
    glasses.
 
 ## Telegram integration
 
-- A Telegram bot (Bot API) handles pairing by code and delivers deals as photo messages with inline buttons
-  (Open gift, Price chart, Watch); `/settings` and `/collections` decide what the glasses show.
+- A Telegram bot (Bot API) handles pairing by code and delivers deals as a TeleFeed gift link with a large preview
+  (gift picture, name, price) and inline buttons (Open gift, Open in TeleFeed, Price chart, Watch);
+  `/settings` (minimum ×, markets, quiet hours, animation) and `/collections` decide what the glasses show.
+- **Open in TeleFeed** opens our Telegram Mini App right on this gift's full info window.
+- Inline mode: type `@telefeedgifts_ai_bot <gift>` in any chat to share live underpriced lots.
 - Watch alerts: the bot writes when a watched gift gets ≥3 % cheaper or is sold.
 - Buttons open the gift directly in Telegram (`t.me/nft/<gift>`) or on the marketplace.
 - The data comes from Telegram itself: new Telegram Market listings are read through the official MTProto API.
