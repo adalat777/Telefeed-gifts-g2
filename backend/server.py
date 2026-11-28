@@ -859,12 +859,33 @@ TELEFEED_API = os.environ.get("TELEFEED_API", "http://127.0.0.1:8080")
 MINIAPP_URL = os.environ.get("MINIAPP_URL", "").rstrip("/")
 
 
-def gift_link(slug):
+_refs = {}               # chat_id -> TeleFeed referral code (cached; codes never change)
+
+
+def ref_code(chat):
+    """28.11 owner: the sender's own TeleFeed referral code (asked from TeleFeed on this machine; never the chat id itself)."""
+    if not chat:
+        return ""
+    if chat in _refs:
+        return _refs[chat]
+    try:
+        with urllib.request.urlopen(f"{TELEFEED_API.rstrip('/')}/api/ref-code?uid={int(chat)}", timeout=3) as r:
+            code = str(json.loads(r.read()).get("code") or "")
+    except Exception:  # noqa: BLE001 — the link works without a code
+        return ""
+    if re.fullmatch(r"[0-9A-Za-z]{1,32}", code):
+        _refs[chat] = code
+        return code
+    return ""
+
+
+def gift_link(slug, chat=None):
     """28.11: TeleFeed page of the gift (/api/g/<slug>) — messengers show the gift picture, name and price as the link
-    preview; a tap opens the TeleFeed Mini App right on this gift."""
+    preview; a tap opens the TeleFeed Mini App right on this gift. With the sender's referral code (?r=)."""
     if not slug or not MINIAPP_URL.startswith("https://"):
         return None
-    return f"{MINIAPP_URL}/api/g/{slug}"
+    code = ref_code(chat)
+    return f"{MINIAPP_URL}/api/g/{slug}" + (f"?r={code}" if code else "")
 
 
 def app_button(slug):
@@ -1248,7 +1269,7 @@ class H(BaseHTTPRequestHandler):
             ok = False
             slug = it.get("id") if isinstance(it.get("id"), str) and re.fullmatch(r"[A-Za-z0-9]+-\d{1,9}", it["id"]) else None
             try:
-                link = gift_link(slug)
+                link = gift_link(slug, chat)
                 if link:   # 28.11 owner: our gift link with a rich preview (big gift picture above, name, price) → TeleFeed
                     params = {"chat_id": chat, "text": f"{link}\n\n{deal_text(it)}",
                               "link_preview_options": {"url": link, "prefer_large_media": True, "show_above_text": True}}

@@ -331,3 +331,46 @@ class TestInline(unittest.TestCase):
         self.assertIn("https://t.me/nft/PlushPepe-412", r[0]["input_message_content"]["message_text"])
         self.assertEqual(server.inline_results("#412", items)[0]["id"], "PlushPepe-412")
         self.assertEqual(len(server.inline_results("", items)), 2)          # sold lots are not offered
+
+
+class RefLinkTest(unittest.TestCase):
+    """28.11 owner: the gift link sent from the glasses carries the sender's own TeleFeed referral code."""
+
+    def setUp(self):
+        self.saved = (server.MINIAPP_URL, server.TELEFEED_API, dict(server._refs))
+        server._refs.clear()
+        server.MINIAPP_URL = "https://tf.example"
+
+    def tearDown(self):
+        server.MINIAPP_URL, server.TELEFEED_API, refs = self.saved
+        server._refs.clear()
+        server._refs.update(refs)
+
+    def test_link_with_code_and_without_when_telefeed_is_down(self):
+        from http.server import BaseHTTPRequestHandler
+        seen = []
+
+        class TF(BaseHTTPRequestHandler):
+            def do_GET(self):
+                seen.append(self.path)
+                body = json.dumps({"code": "ab12cd34"}).encode()
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(body)
+
+            def log_message(self, *a):
+                pass
+        tf = ThreadingHTTPServer(("127.0.0.1", 0), TF)
+        threading.Thread(target=tf.serve_forever, daemon=True).start()
+        try:
+            server.TELEFEED_API = f"http://127.0.0.1:{tf.server_address[1]}"
+            self.assertEqual(server.gift_link("PlushPepe-1", 555), "https://tf.example/api/g/PlushPepe-1?r=ab12cd34")
+            server.gift_link("PlushPepe-2", 555)
+            self.assertEqual(seen, ["/api/ref-code?uid=555"])          # code is cached per chat
+        finally:
+            tf.shutdown()
+        server._refs.clear()
+        server.TELEFEED_API = "http://127.0.0.1:9"                       # nothing listens there
+        self.assertEqual(server.gift_link("PlushPepe-1", 777), "https://tf.example/api/g/PlushPepe-1")
+        self.assertEqual(server.gift_link("PlushPepe-1"), "https://tf.example/api/g/PlushPepe-1")
