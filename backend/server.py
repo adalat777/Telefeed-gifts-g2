@@ -30,6 +30,7 @@ import re
 import secrets
 import sqlite3
 import ssl
+import sys
 import threading
 import time
 import urllib.error
@@ -1264,8 +1265,34 @@ class H(BaseHTTPRequestHandler):
         pass
 
 
+def self_update_loop(every=5):
+    """28.11 owner: "can updates land much faster?" — on the server (RELAY_TO_TELEFEED=1) check GitHub every 5 s
+    (a cheap `git ls-remote`); new commit → pull; server.py changed → restart in place (same command, ~2 s)."""
+    import subprocess
+    repo = os.path.dirname(HERE)
+    git = lambda *a: subprocess.run(["git", "-C", repo, *a], capture_output=True, text=True, timeout=30)  # noqa: E731
+    me = os.path.join(HERE, "server.py")
+    while True:
+        time.sleep(every)
+        try:
+            remote = (git("ls-remote", "origin", "refs/heads/main").stdout.split() or [""])[0]
+            local = git("rev-parse", "HEAD").stdout.strip()
+            if not remote or remote == local:
+                continue
+            before = hashlib.sha1(open(me, "rb").read()).hexdigest()
+            if git("pull", "--ff-only", "-q").returncode != 0:
+                continue
+            if hashlib.sha1(open(me, "rb").read()).hexdigest() != before:
+                print("New version from GitHub — restarting")
+                os.execv(sys.executable, [sys.executable, *sys.argv])
+        except Exception as e:  # noqa: BLE001 — try again next time
+            print("Self-update:", type(e).__name__, e)
+
+
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", "8090"))
+    if os.environ.get("RELAY_TO_TELEFEED") == "1" and os.path.isdir(os.path.join(os.path.dirname(HERE), ".git")):
+        threading.Thread(target=self_update_loop, daemon=True).start()
     if BOT:
         try:
             tg("setMyCommands", {"commands": [{"command": "settings", "description": "What the glasses show"},
