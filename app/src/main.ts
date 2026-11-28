@@ -168,7 +168,7 @@ const PATTERN_GRAY = 20                         // the lens lifts darks: 40 show
 const PATTERN_VIEW = 1                           // the whole card: model 30 % smaller than the tight crop, all symbols as on the official card (owner 27.11)
 async function patternLayer(slug: string, w: number, h: number): Promise<HTMLCanvasElement | null> {
   try {
-    const r = await fetch(`${API}/model-anim?slug=${encodeURIComponent(slug)}&layer=pattern&v=3`)
+    const r = await fetch(`${API}/model-anim?slug=${encodeURIComponent(slug)}&layer=pattern&v=4`)
     if (!r.ok) return null
     const data = await r.json()
     const box = document.createElement('div')

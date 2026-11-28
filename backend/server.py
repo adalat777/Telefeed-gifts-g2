@@ -23,6 +23,7 @@ Secrets never leave this process: the glasses app only gets an opaque pairing to
 """
 import hashlib
 import json
+import math
 import os
 import random
 import re
@@ -406,12 +407,50 @@ FRAGMENT_LOTTIE = "https://nft.fragment.com/gift/{}.lottie.json"
 _anim_lock = threading.Lock()
 
 
+def _sym_pos(L):
+    k = (L.get("ks") or {}).get("p", {}).get("k")
+    if isinstance(k, list) and k and isinstance(k[0], dict):
+        k = k[0].get("s")
+    return (float(k[0]), float(k[1])) if isinstance(k, list) and len(k) >= 2 else None
+
+
+def even_half(layers, cx=256.0):
+    """28.11 owner: "symbols spread evenly" — half of the symbols, picked by position (farthest-point, keeping left/right
+    mirror pairs together) instead of every other one in file order (that left clusters on one side)."""
+    pts = [_sym_pos(L) for L in layers]
+    idx = [i for i, p in enumerate(pts) if p]
+    if len(idx) < 4:
+        return layers[::2]
+    used, groups = set(), []
+    for i in idx:
+        if i in used:
+            continue
+        x, y = pts[i]
+        mate = next((j for j in idx if j != i and j not in used and abs(pts[j][0] - (2 * cx - x)) < 12
+                     and abs(pts[j][1] - y) < 12), None)
+        g = [i] + ([mate] if mate is not None and abs(x - cx) > 12 else [])
+        used.update(g)
+        groups.append(g)
+    want = max(1, round(len(idx) / 2))
+    dist = lambda a, b: math.hypot(pts[a][0] - pts[b][0], pts[a][1] - pts[b][1])   # noqa: E731
+    start = min(range(len(groups)), key=lambda g: math.hypot(pts[groups[g][0]][0] - cx, pts[groups[g][0]][1] - 256))
+    chosen, cnt = [start], len(groups[start])
+    while cnt < want:
+        rest = [g for g in range(len(groups)) if g not in chosen]
+        if not rest:
+            break
+        best = max(rest, key=lambda g: min(dist(a, b) for a in groups[g] for c in chosen for b in groups[c]))
+        chosen.append(best)
+        cnt += len(groups[best])
+    return [layers[i] for i in sorted(i for g in chosen for i in groups[g])]
+
+
 def model_anim(slug, layer="gift"):
     """The gift's animation from Fragment with only one layer — "Gift" (the model) or "Pattern" (the symbols around it,
     on the same 512×512 canvas, so they sit exactly as on the official card) — JSON bytes, cached on disk; None if absent."""
     if not re.fullmatch(r"[A-Za-z0-9]+-\d{1,9}", slug or "") or layer not in ("gift", "pattern"):
         return None
-    path = os.path.join(IMG_CACHE, ("anim_" if layer == "gift" else "pat3_") + slug.lower() + ".json")
+    path = os.path.join(IMG_CACHE, ("anim_" if layer == "gift" else "pat4_") + slug.lower() + ".json")
     miss = path[:-5] + ".none"
     if os.path.exists(path):
         return open(path, "rb").read()
@@ -443,10 +482,10 @@ def model_anim(slug, layer="gift"):
             return None
         for x in keep:            # the 'Pattern' layer is a matte for 'Color Icon' and is not drawn itself — draw it
             x.pop("td", None)
-        if layer == "pattern":    # half as many symbols (owner 27.11): every other one, from both rings
+        if layer == "pattern":    # half as many symbols (owner 27.11), spread evenly (28.11)
             for a in d.get("assets") or []:
                 if a.get("id") in {x.get("refId") for x in keep} and isinstance(a.get("layers"), list):
-                    a["layers"] = a["layers"][::2]
+                    a["layers"] = even_half(a["layers"])
         d["layers"] = keep
         data = json.dumps(d, separators=(",", ":")).encode()
         with open(path, "wb") as f:
