@@ -660,6 +660,9 @@ def check_watches():
 
 
 # ---------- signals (read-only) ----------
+NEXT_MAX_X = 10
+
+
 def signals(limit=20, minutes=60):
     key = (limit, minutes)
     hit = _cache.get(key)
@@ -678,7 +681,7 @@ def signals(limit=20, minutes=60):
             (time.time() - 600, since)).fetchall()]
     finally:
         db.close()
-    items = []
+    items, seen_gifts = [], set()
     for raw, best, last, status in rows:
         try:
             d = json.loads(raw)
@@ -696,6 +699,10 @@ def signals(limit=20, minutes=60):
         cheapest = bool(floor and stars_now and floor >= stars_now)   # every other same lot costs more
         if cheapest:
             floor = None
+        gk = (d.get("title"), d.get("num"))
+        if gk in seen_gifts:          # owner 28.11: the same gift twice in a row looks like the swipe did nothing
+            continue
+        seen_gifts.add(gk)
         items.append({
             "id": d.get("slug") or str(d.get("id")), "title": d.get("title"), "num": d.get("num"),
             "model": d.get("model"), "backdrop": d.get("backdrop"), "pattern": d.get("pattern"),
@@ -705,7 +712,9 @@ def signals(limit=20, minutes=60):
             # where the top sale (the "×" is measured to) happened: Telegram Market unless the estimate says on-chain
             "max_mk": h.get("max_venue") or ("On-chain" if h.get("max_market") == "onchain" else "Telegram"),
             # the competition on Telegram Market: the cheapest other same lot (★) and how many there are — 0: nobody else sells it
-            "next": res.get("floor"), "same": res.get("same"), "market": d.get("market") or "telegram",
+            # a "competitor" ten times dearer than this lot is junk (a seller's typo) — not shown (owner 28.11, video)
+            "next": res.get("floor") if not (res.get("floor") and stars_now and res["floor"] > stars_now * NEXT_MAX_X) else None,
+            "same": res.get("same"), "market": d.get("market") or "telegram",
             "url": d.get("url") or (f"https://t.me/nft/{d['slug']}" if d.get("slug") else None),
             "seen_s": int(time.time() - last),
             "resell": resell(d, h, res, usd_rate),
@@ -928,7 +937,7 @@ def full_info(slug, col, model, backdrop, stars=None, pattern="", mr=None, br=No
     the sales history of this model + backdrop, and the same gifts on sale now on every marketplace."""
     key = (slug, col, model, backdrop, stars)
     hit = _full_cache.get(key)
-    if hit and time.time() - hit[0] < 30:
+    if hit and time.time() - hit[0] < (4 if hit[1].get("on_sale_wait") else 30):
         return hit[1]
     q = urllib.parse.urlencode({"title": col, "model": model, "backdrop": backdrop, "slug": slug, "stars": stars or ""})
     res = {}
@@ -997,7 +1006,7 @@ def full_info(slug, col, model, backdrop, stars=None, pattern="", mr=None, br=No
         "issued": issued, "supply": cnt.get("supply"),
         "n_model": int(issued * pm) if issued and pm else None,
         "n_combo": int(issued * pm * pb) if issued and pm and pb else None,
-        "history": hist, "on_sale": uniq[:20], "on_sale_wait": not sim,
+        "history": hist, "on_sale": uniq[:20], "on_sale_wait": not sim or bool(sim.get("markets_wait") or sim.get("partial")),
     }
     _full_cache[key] = (time.time(), out)
     if len(_full_cache) > 100:

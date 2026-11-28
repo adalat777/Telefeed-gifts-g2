@@ -15,7 +15,8 @@
 Сцены 7–11 (Telegram) записываются руками, озвучка к ним — scene07…scene11.aiff (voice/make.sh).
 
   --no-record   не включать запись экрана (записывайте сами Cmd+Shift+5)
-  --region=x,y,w,h  записывать только этот кусок экрана (например, окно «Glasses Display»)
+  --region=x,y,w,h  записывать только этот кусок экрана (по умолчанию — сам экран очков, без кнопок эмулятора)
+  --full-screen     записывать весь экран
 """
 import json
 import os
@@ -44,6 +45,35 @@ TIMELINE = {
     "05": [(0.03, "double_click")],                                   # Double tap → лента
     "06": [(0.30, "long_press")],                                     # Just hold → лот в Telegram
 }
+
+
+FIND_WINDOW = r"""
+import CoreGraphics
+let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID) as! [[String: Any]]
+for w in list where (w["kCGWindowName"] as? String) == "Glasses Display" {
+  let b = w["kCGWindowBounds"] as! [String: Double]
+  print(Int(b["X"]!), Int(b["Y"]!), Int(b["Width"]!), Int(b["Height"]!)); break
+}
+"""
+TITLE_H, BUTTONS_H = 31, 41   # the simulator window: its title bar on top, the Up / Down / Click… buttons below
+
+
+def raise_glasses():
+    """Bring the simulator window to the front, so nothing covers it in the recording."""
+    subprocess.run(["osascript", "-e", 'tell application "System Events" to set frontmost of '
+                    '(first process whose name is "evenhub-simulator") to true'], capture_output=True)
+
+
+def glasses_region():
+    """Only the lens of the glasses: the "Glasses Display" window without its title bar and buttons."""
+    path = "/tmp/tf_find_window.swift"
+    with open(path, "w") as f:
+        f.write(FIND_WINDOW)
+    out = subprocess.run(["swift", path], capture_output=True, text=True).stdout.split()
+    if len(out) != 4:
+        return None
+    x, y, w, h = map(int, out)
+    return f"{x},{y + TITLE_H},{w},{h - TITLE_H - BUTTONS_H}"
 
 
 def say(voice, text, path):
@@ -105,16 +135,22 @@ def main():
     print(f"Озвучка целиком: {voice_file} ({duration(voice_file):.1f} с, план {total:.1f} с)")
 
     print("\nЛента в эмуляторе должна быть открыта (не «полная информация»).")
-    print("Переключитесь на окно эмулятора — начинаю через 5 секунд…")
+    print("Начинаю через 5 секунд — не трогайте Мак, пока идёт запись…")
     for i in range(5, 0, -1):
         print(f"  {i}…")
         time.sleep(1)
+    raise_glasses()
+    time.sleep(0.5)
 
     rec = None
     if record:
         try:
             cmd = ["screencapture", "-v", "-V" + str(int(total + 3))]
             region = [a.split("=", 1)[1] for a in sys.argv if a.startswith("--region=")]
+            if not region and "--full-screen" not in sys.argv:
+                found = glasses_region()
+                region = [found] if found else []
+                print("Пишу только экран очков:" if found else "Окно очков не нашёл — пишу весь экран", found or "")
             if region:  # только окно очков: --region=x,y,ширина,высота (в точках экрана)
                 cmd.append("-R" + region[0])
             rec = subprocess.Popen(cmd + [VIDEO])

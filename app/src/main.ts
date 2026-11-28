@@ -615,7 +615,8 @@ const ROWS = 7
 async function loadFull(d: Deal) {
   const k = d.id
   const have = fullCache.get(k)
-  if (have && have.v !== 'error' && (have.v === 'loading' || Date.now() - have.at < 60_000)) return
+  const waiting = have && typeof have.v === 'object' && have.v.on_sale_wait
+  if (have && have.v !== 'error' && (have.v === 'loading' || Date.now() - have.at < (waiting ? 3_000 : 60_000))) return
   fullCache.set(k, { at: Date.now(), v: have && have.v !== 'loading' && have.v !== 'error' ? have.v : 'loading' })
   const q = new URLSearchParams({ c: d.title, m: d.model, b: d.backdrop, slug: d.id, stars: String(d.stars || ''),
     mr: d.mr || '', br: d.br || '' })
@@ -624,6 +625,8 @@ async function loadFull(d: Deal) {
     fullCache.set(k, { at: Date.now(), v: r.ok ? await r.json() as Full : 'error' })
   } catch { fullCache.set(k, { at: Date.now(), v: 'error' }) }
   if (view === 'history' && deals[idx]?.id === d.id) paint()
+  const v = fullCache.get(k)?.v
+  if (view === 'history' && deals[idx]?.id === d.id && v && typeof v === 'object' && v.on_sale_wait) setTimeout(() => loadFull(d), 3_000)
 }
 
 const pad2 = (n: number) => String(n).padStart(2, '0')
@@ -1046,7 +1049,7 @@ function drawGlance(ctx: CanvasRenderingContext2D, d: Deal, pic: HTMLCanvasEleme
   const sig: string[] = []
   const $r = (v: number) => `$${v >= 10 ? Math.round(v) : money(v)}`
   if (d.same === 0) sig.push('no others on sale')
-  else if (d.cheapest && d.next) {
+  else if (d.cheapest && d.next && !(d.stars && d.next > d.stars * 10)) {
     const nu = d.next * STAR_USD, pct = dollars ? Math.round((nu / dollars - 1) * 100) : null
     sig.push(`cheapest · next ${$r(nu)}${pct != null && pct > 0 ? ` (+${pct}%)` : ''}`)
   } else if (d.cheapest) sig.push('cheapest on sale')
@@ -1275,7 +1278,8 @@ async function poll() {
     const known = new Set(deals.map((d) => d.id))
     const curDeal = deals[idx]
     if (curDeal && !curDeal.sold && goneSet.has(curDeal.id)) markSold(curDeal)   // the one you look at was just bought
-    const items = data.items.filter((d) => !goneSet.has(d.id))
+    const once = new Set<string>()
+    const items = data.items.filter((d) => !goneSet.has(d.id) && !once.has(`${d.title}#${d.num}`) && !!once.add(`${d.title}#${d.num}`))
     const added = items.filter((d) => !known.has(d.id)).length
     const cur = curDeal?.id
     pollAt = Date.now()
@@ -1402,6 +1406,7 @@ async function prefetchFrames() {
     for (let k = 0; k < PREFETCH_AHEAD; k++) {     // 28.11 owner: «after Up the gift thinks long» — ready before you swipe
       const d = deals[Math.min(deals.length - 1, idx + k)]
       if (d && !d.sold) await modelFrames(d.id)
+      if (d && !d.sold && k < 3) loadFull(d)
     }
   } finally { prefetching = false }
 }
