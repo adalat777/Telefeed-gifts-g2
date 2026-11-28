@@ -39,6 +39,19 @@ import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+STARTED = int(time.time())
+
+
+def _version():
+    try:
+        import subprocess
+        return subprocess.run(["git", "-C", os.path.dirname(HERE), "rev-parse", "--short", "HEAD"], capture_output=True,
+                              text=True, timeout=5).stdout.strip() or None
+    except Exception:  # noqa: BLE001
+        return None
+
+
+VERSION = _version()
 DB = os.environ.get("TELEFEED_DB") or os.path.normpath(os.path.join(HERE, "..", "..", "data", "feed.db"))
 PAIRS = os.path.join(HERE, "pairs.json")          # token -> chat_id (gitignored)
 STAR_USD = 0.015                                  # what Telegram Stars cost to buy
@@ -1087,7 +1100,7 @@ class H(BaseHTTPRequestHandler):
     def do_GET(self):
         u = urllib.parse.urlparse(self.path)
         if u.path == "/health":
-            return self._send(200, {"ok": True, "bot": bool(BOT)})
+            return self._send(200, {"ok": True, "bot": bool(BOT), "version": VERSION, "started": STARTED})
         if u.path == "/signals":
             q = urllib.parse.parse_qs(u.query)
             try:
