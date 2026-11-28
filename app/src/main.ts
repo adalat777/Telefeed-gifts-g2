@@ -330,7 +330,7 @@ async function playModel(d: Deal) {
     if (deals[idx]?.id !== d.id || !animView() || asleep || (confirmDeal && Date.now() < confirmUntil)) break
     if (animOnce && performance.now() - start >= dur) break      // the user chose "once" in the bot's /settings
     const t0 = performance.now()
-    animStep = i; paint(); shown++
+    animStep = i; animOnly = true; paint(); animOnly = false; shown++
     await new Promise((res) => setTimeout(res, 0))
     while (drawing) await new Promise((res) => setTimeout(res, 4))      // wait until this frame is on the lens
     costMs = 0.8 * costMs + 0.2 * (performance.now() - t0)              // how long the lens takes per frame
@@ -1087,35 +1087,43 @@ function drawMessage(ctx: CanvasRenderingContext2D, right: string, title: string
   if (big) { ctx.font = `800 48px ${FONT}`; ctx.fillStyle = '#fff'; ctx.fillText(big, 24, y + 40) }
 }
 
-// send the canvas to the glasses as 4 tiles, one update at a time; skip tiles that did not change
-const sentTile = new Map<number, string>()
+// send the canvas to the glasses as 4 tiles, one update at a time; skip tiles that did not change.
+// 28.11 owner «as many frames as the lens can show»: while a gift animates only its column (t1 + t3) is re-encoded and
+// sent each frame — the text on the right goes once a second; each tile is PNG-encoded once (no second toDataURL pass)
+const sentTile = new Map<number, number>()
 let drawing = false
 let wanted: (() => Promise<HTMLCanvasElement>) | null = null
+let animOnly = false, fullAt = 0, wantedAnim = false
+const ANIM_TILES = new Set([1, 3])
+function hashBytes(b: Uint8Array) { let h = 2166136261; for (let i = 0; i < b.length; i++) h = Math.imul(h ^ b[i], 16777619); return h >>> 0 }
 
 async function show(render: () => Promise<HTMLCanvasElement>) {
-  wanted = render
+  wanted = render; wantedAnim = animOnly          // remember: was this paint just an animation frame?
   if (drawing) return
   drawing = true
   try {
     while (wanted) {
-      const r = wanted; wanted = null
+      const r = wanted, isAnim = wantedAnim; wanted = null
       const full = await r()
+      const onlyAnim = isAnim && Date.now() - fullAt < 1000
+      if (!onlyAnim) fullAt = Date.now()
       // encode all changed tiles first, then send them one right after another — the halves of the gift (top and bottom
       // tiles) change together, without a visible tear between them
-      const ready: { t: typeof TILES[number]; url: string; bytes: number[] }[] = []
+      const ready: { t: typeof TILES[number]; h: number; bytes: number[] }[] = []
       for (const t of TILES) {
+        if (onlyAnim && !ANIM_TILES.has(t.id)) continue
         const c = document.createElement('canvas'); c.width = t.w; c.height = t.h
         const ctx = c.getContext('2d')!
         ctx.fillStyle = '#000'; ctx.fillRect(0, 0, t.w, t.h)
         ctx.drawImage(full, -t.x, -t.y)
-        const url = c.toDataURL('image/png')
-        if (sentTile.get(t.id) === url) continue
         const blob: Blob = await new Promise((res) => c.toBlob((b) => res(b!), 'image/png'))
-        ready.push({ t, url, bytes: Array.from(new Uint8Array(await blob.arrayBuffer())) })
+        const u8 = new Uint8Array(await blob.arrayBuffer()), h = hashBytes(u8)
+        if (sentTile.get(t.id) === h) continue
+        ready.push({ t, h, bytes: Array.from(u8) })
       }
-      for (const { t, url, bytes } of ready) {
+      for (const { t, h, bytes } of ready) {
         await bridge.updateImageRawData(new ImageRawDataUpdate({ containerID: t.id, containerName: t.name, imageData: bytes }))
-        sentTile.set(t.id, url)
+        sentTile.set(t.id, h)
       }
     }
   } catch { /* keep going on the next paint */ } finally { drawing = false }
