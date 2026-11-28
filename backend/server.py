@@ -39,7 +39,7 @@ import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-STARTED = int(time.time())
+STARTED = int(time.time())   # when this copy started (with "version" — check that an update landed)
 
 
 def _version():
