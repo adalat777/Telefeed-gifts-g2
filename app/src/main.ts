@@ -1162,6 +1162,8 @@ function ago(s: number) {
   return `${Math.floor(s / 3600)} h ago`
 }
 function paint() {
+  ;(window as unknown as { __deal?: Deal }).__deal = deals[idx]   // the browser demo / video page reads the deal on the lens
+
   const tip = Date.now() < toastUntil ? toastText : null
   if (mode === 'pair') {
     const code = pairCode

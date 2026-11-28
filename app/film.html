@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<title>TeleGift Glance — film</title>
+<style>
+  html,body{margin:0;height:100%;background:#05060d;overflow:hidden;font-family:-apple-system,"SF Pro Display","Inter",system-ui,sans-serif;color:#fff}
+  #stage{position:absolute;left:0;top:0;width:1920px;height:1080px;transform-origin:0 0;overflow:hidden}
+  .scene{position:absolute;inset:0;opacity:0;transition:opacity .7s ease}
+  .scene.on{opacity:1}
+  /* backgrounds */
+  #bgSplit{background:radial-gradient(1200px 800px at 25% 40%,#2a1f7a 0%,#0b0a24 55%,#05060d 100%)}
+  #bgCity{background:linear-gradient(180deg,#0a1030 0%,#1a1446 45%,#2b1238 70%,#0a0612 100%)}
+  #bgPhone{background:radial-gradient(1000px 700px at 70% 50%,#1b3a8a 0%,#0b1230 55%,#05060d 100%)}
+  /* intro */
+  #intro{display:flex;flex-direction:column;align-items:center;justify-content:center;background:#05060d}
+  #intro img{width:300px;height:300px;transform:scale(.8);opacity:0;transition:transform 1.4s cubic-bezier(.2,.8,.2,1),opacity 1s}
+  #intro.on img{transform:scale(1);opacity:1}
+  #intro h1{margin:28px 0 0;font-size:120px;letter-spacing:.14em;font-weight:900;background:linear-gradient(90deg,#8ea2ff,#4338ca 40%,#22d3ee);-webkit-background-clip:text;color:transparent}
+  #intro p{margin:14px 0 0;font-size:34px;letter-spacing:.32em;text-transform:uppercase;color:#9aa3c7}
+  /* gift card */
+  #card{position:absolute;left:170px;top:110px;width:520px;border-radius:40px;overflow:hidden;background:#11142b;box-shadow:0 40px 120px rgba(67,56,202,.45);transition:all .9s cubic-bezier(.2,.8,.2,1)}
+  #card img{display:block;width:520px;height:520px;object-fit:cover}
+  #card .meta{padding:26px 34px 32px}
+  #card .t{font-size:40px;font-weight:800}
+  #card .s{font-size:26px;color:#a8b0d6;margin-top:6px}
+  #card .p{display:flex;justify-content:space-between;align-items:center;margin-top:22px}
+  #card .price{font-size:38px;white-space:nowrap;font-weight:900}
+  #card .x{font-size:34px;font-weight:900;color:#5dff9e;background:rgba(93,255,158,.12);padding:8px 18px;border-radius:999px}
+  #arrow{position:absolute;left:750px;top:440px;font-size:64px;color:#8ea2ff;opacity:0;transition:opacity .6s}
+  #arrow.on{opacity:.9}
+  /* the lens (live G2 simulator) */
+  #lensBox{position:absolute;left:880px;top:250px;width:900px;height:450px;border-radius:44px;padding:22px;background:linear-gradient(145deg,#1d2240,#0c0f22);box-shadow:0 0 0 2px rgba(142,162,255,.25),0 30px 120px rgba(34,211,238,.18);opacity:0;transition:all 1s cubic-bezier(.2,.8,.2,1)}
+  #lensBox.on{opacity:1}
+  #lensBox .tag{position:absolute;top:-52px;left:8px;font-size:24px;letter-spacing:.24em;text-transform:uppercase;color:#7ef3a0}
+  #lens{width:100%;height:100%;border:0;border-radius:24px;background:#000}
+  /* POV: the lens floats as a HUD */
+  body.pov #lensBox{left:1140px;top:110px;width:640px;height:320px;padding:10px;background:rgba(0,0,0,.35);box-shadow:0 0 60px rgba(126,243,160,.35)}
+  body.pov #lensBox .tag{display:none}
+  body.phone #lensBox{left:120px;top:330px;width:620px;height:310px;padding:12px}
+  .street{position:absolute;inset:0;overflow:hidden}
+  .bld{position:absolute;bottom:0;background:linear-gradient(180deg,#141a3a,#070914);border-top:2px solid rgba(142,162,255,.15)}
+  .win{position:absolute;width:10px;height:14px;background:#ffd88a;opacity:.55;border-radius:2px}
+  .bokeh{position:absolute;border-radius:50%;filter:blur(2px);animation:drift 9s linear infinite}
+  @keyframes drift{from{transform:translateX(0)}to{transform:translateX(-420px)}}
+  .rim{position:absolute;inset:40px;border-radius:220px 220px 260px 260px;border:26px solid rgba(10,12,24,.85);box-shadow:inset 0 0 80px rgba(0,0,0,.7)}
+  /* phone */
+  #phone{position:absolute;left:1080px;top:70px;width:440px;height:900px;border-radius:64px;background:#0b0d18;box-shadow:0 0 0 12px #1c2036,0 50px 140px rgba(0,0,0,.6);overflow:hidden}
+  #phone .bar{height:110px;background:#151a33;display:flex;align-items:flex-end;padding:0 26px 18px;gap:14px}
+  #phone .ava{width:52px;height:52px;border-radius:50%;background:url(/film/logo.svg) center/cover,#1f6fb8}
+  #phone .nm{font-size:22px;font-weight:700}#phone .nm small{display:block;font-size:15px;color:#8a93b8;font-weight:400}
+  #chat{padding:24px 18px;background:#0e1226;height:790px;position:relative}
+  .msg{background:#1c2244;border-radius:22px 22px 22px 6px;overflow:hidden;width:360px;transform:translateY(40px);opacity:0;transition:all .7s cubic-bezier(.2,.8,.2,1)}
+  .msg.on{transform:none;opacity:1}
+  .msg img{display:block;width:360px;height:280px;object-fit:cover}
+  .msg .tx{padding:14px 16px 6px;font-size:18px;line-height:1.35}
+  .msg .tx b{font-size:20px}
+  .btns{display:flex;flex-direction:column;gap:8px;padding:10px 12px 14px}
+  .btns div{background:#2b3366;border-radius:12px;text-align:center;padding:12px;font-size:17px;font-weight:600;transition:all .3s}
+  .btns div.press{background:#5046e5;transform:scale(.97)}
+  #app{position:absolute;inset:0;background:#000 url(/film/welcome.jpg) center/cover;opacity:0;transition:opacity .8s}
+  #app.on{opacity:1}
+  /* captions */
+  #cap{position:absolute;left:0;right:0;bottom:70px;text-align:center;font-size:46px;font-weight:800;letter-spacing:.01em;opacity:0;transform:translateY(16px);transition:all .5s}
+  #cap.on{opacity:1;transform:none}
+  #cap .g{display:inline-block;margin-right:18px;padding:6px 20px;border-radius:999px;background:rgba(126,243,160,.15);color:#7ef3a0;font-size:38px}
+  #end{display:flex;flex-direction:column;align-items:center;justify-content:center;background:#05060d;text-align:center}
+  #end img{width:180px}
+  #end h2{font-size:86px;margin:22px 0 6px;letter-spacing:.06em}
+  #end p{font-size:30px;color:#9aa3c7;margin:6px}
+  #play{position:fixed;right:16px;bottom:16px;z-index:9;font:600 16px system-ui;padding:10px 18px;border-radius:999px;border:0;background:#4338ca;color:#fff;cursor:pointer}
+</style></head>
+<body>
+<div id="stage">
+  <div class="scene" id="bgSplit"></div>
+  <div class="scene" id="bgCity"><div class="street" id="street"></div><div class="rim"></div></div>
+  <div class="scene" id="bgPhone"></div>
+  <div class="scene" id="splitL">
+    <div id="card"><img id="cardImg" alt=""><div class="meta"><div class="t" id="cardT"></div><div class="s" id="cardS"></div>
+      <div class="p"><span class="price" id="cardP"></span><span class="x" id="cardX"></span></div></div></div>
+    <div id="arrow">→</div>
+  </div>
+  <div id="lensBox"><div class="tag">what your Even G2 shows</div><iframe id="lens" src="/?demo"></iframe></div>
+  <div class="scene" id="phoneS"><div id="phone">
+    <div class="bar"><div class="ava"></div><div class="nm">TeleGift<small>bot</small></div></div>
+    <div id="chat"><div class="msg" id="msg"><img id="msgImg" alt=""><div class="tx" id="msgT"></div>
+      <div class="btns"><div id="b1">🎁 Open gift</div><div id="b2">📱 Open in TeleFeed</div></div></div>
+      <div id="app"></div></div></div></div>
+  <div class="scene" id="intro"><img src="/film/logo-dark.svg" alt=""><h1>TELEGIFT</h1><p>Glance · for Even G2</p></div>
+  <div class="scene" id="end"><img src="/film/logo-dark.svg" alt=""><h2>TeleGift Glance</h2><p>Underpriced Telegram Gifts — in the corner of your eye</p><p style="font-size:22px;opacity:.7">github.com/adalat777/Telefeed-gifts-g2 · data, not financial advice</p></div>
+  <div id="cap"></div>
+</div>
+<button id="play" onclick="run()">▶ Play</button>
+<script>
+const $=(id)=>document.getElementById(id)
+function fit(){const k=Math.min(innerWidth/1920,innerHeight/1080);$('stage').style.transform=`scale(${k})`;$('stage').style.left=(innerWidth-1920*k)/2+'px';$('stage').style.top=(innerHeight-1080*k)/2+'px'}
+addEventListener('resize',fit);fit()
+// street: buildings with lit windows, drifting city lights
+;(()=>{const st=$('street');let x=0
+  while(x<2600){const w=120+Math.random()*220,h=260+Math.random()*520,b=document.createElement('div');b.className='bld';b.style.left=x+'px';b.style.width=w+'px';b.style.height=h+'px'
+    for(let i=0;i<w*h/2600;i++){const wn=document.createElement('div');wn.className='win';wn.style.left=(10+Math.random()*(w-24))+'px';wn.style.top=(14+Math.random()*(h-40))+'px';if(Math.random()<.5)wn.style.opacity=.15;b.appendChild(wn)}
+    st.appendChild(b);x+=w+6}
+  const cols=['#ff7ab6','#7ef3a0','#8ea2ff','#ffd88a','#22d3ee']
+  for(let i=0;i<46;i++){const o=document.createElement('div');o.className='bokeh';const s=14+Math.random()*60;o.style.width=o.style.height=s+'px';o.style.left=Math.random()*2400+'px';o.style.top=(500+Math.random()*560)+'px';o.style.background=cols[i%5];o.style.opacity=.18+Math.random()*.35;o.style.animationDuration=(5+Math.random()*8)+'s';st.appendChild(o)}})()
+
+const API='https://g2.77-216-135-201.sslip.io'
+let deals=[],di=0
+const img=(slug)=>`https://nft.fragment.com/gift/${String(slug).toLowerCase()}.large.jpg`
+const usd=(d)=>d.usd?`$${d.usd>=10?Math.round(d.usd):d.usd.toFixed(2)}`:''
+function card(){const d=deals[di];if(!d)return
+  $('cardImg').src=img(d.id);$('cardT').textContent=`${d.title} #${d.num}`;$('cardS').textContent=`${d.model} · ${d.backdrop}`
+  $('cardP').textContent=`${d.cur==='STARS'?Math.round(d.price).toLocaleString('en')+' ★':d.price+' GRAM'}  ${usd(d)?'≈ '+usd(d):''}`;$('cardX').textContent=`↗ ${d.x}×`
+  $('msgImg').src=img(d.id);$('msgT').innerHTML=`<b>${d.title} #${d.num}</b><br>${d.model} · ${d.backdrop}<br>${$('cardP').textContent} · ↗ ${d.x}× to the top sale`}
+function key(k){const w=$('lens').contentWindow;w.dispatchEvent(new w.KeyboardEvent('keydown',{key:k,bubbles:true}))}
+function cap(g,t){const c=$('cap');c.classList.remove('on');setTimeout(()=>{c.innerHTML=(g?`<span class="g">${g}</span>`:'')+t;c.classList.add('on')},250)}
+function capOff(){$('cap').classList.remove('on')}
+function scene(...ids){for(const s of document.querySelectorAll('.scene'))s.classList.toggle('on',ids.includes(s.id))}
+const T=[]
+const at=(ms,f)=>T.push([ms,f])
+at(0,()=>{scene('intro');document.body.className='';$('lensBox').classList.remove('on');$('arrow').classList.remove('on');$('msg').classList.remove('on');$('app').classList.remove('on')})
+at(3600,()=>{scene('bgSplit','splitL');$('lensBox').classList.add('on');setTimeout(()=>$('arrow').classList.add('on'),800);cap('LIVE','Fresh underpriced gifts — straight to your glasses')})
+at(4200,()=>key('Enter'))
+at(9000,()=>{key('ArrowUp');cap('SWIPE ↑','Next deal')})
+at(13000,()=>{key('ArrowUp');cap('SWIPE ↑','×N to the top clean sale · % below market')})
+at(17000,()=>{key('Enter');cap('TAP','Full gift info: rarity, floors, supply')})
+at(21000,()=>{key('Enter');cap('TAP','Every sale of this model + backdrop, every market')})
+at(25000,()=>{key('Enter');cap('TAP','Who sells the same gift right now')})
+at(29000,()=>{key('d');cap('2× TAP','Back to the feed')})
+at(31500,()=>{scene('bgCity');document.body.className='pov';cap('','On the street — a deal pops up in the corner of your eye')})
+at(35500,()=>{key('ArrowUp');cap('SWIPE ↑','No phone in your hand')})
+at(39500,()=>{scene('bgPhone','phoneS');document.body.className='phone';cap('HOLD','The deal lands in your Telegram');setTimeout(()=>$('msg').classList.add('on'),700)})
+at(44000,()=>{$('b2').classList.add('press');cap('','Open in TeleFeed — the whole market picture')})
+at(44700,()=>{$('b2').classList.remove('press');$('app').classList.add('on')})
+at(49000,()=>{scene('end');document.body.className='';$('lensBox').classList.remove('on');capOff()})
+setInterval(()=>{try{const d=$('lens').contentWindow.__deal;if(d&&(!deals[di]||deals[di].id!==d.id)){deals=[d];di=0;card()}}catch{}},250)
+let timers=[]
+async function run(){timers.forEach(clearTimeout);timers=[];$('play').style.display='none'
+  try{const r=await fetch(API+'/signals?limit=20&minutes=60');deals=(await r.json()).items||[]}catch{}
+  di=0;card();for(const[ms,f]of T)timers.push(setTimeout(f,ms))}
+$('lens').addEventListener('load',()=>{const d=$('lens').contentDocument,st=d.createElement('style')
+  st.textContent='.pad,.note{display:none!important}html,body{margin:0!important;background:#000!important;height:100%;overflow:hidden}body>div{min-height:0!important;height:100%!important;padding:0!important;display:flex!important;align-items:center!important;justify-content:center!important;background:#000!important}.lens-wrap{padding:0!important;border:0!important;background:#000!important;border-radius:0!important;box-shadow:none!important;width:100%!important;max-width:none!important}canvas.lens{width:100%!important;height:auto!important;border-radius:0!important}'
+  d.head.appendChild(st)})
+window.FILM_MS=53000
+if(location.search.includes('auto'))run()
+</script>
+</body></html>
