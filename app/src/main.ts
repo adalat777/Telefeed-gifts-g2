@@ -160,7 +160,7 @@ async function stillPicture(title: string, model: string): Promise<HTMLCanvasEle
   c.getContext('2d')!.drawImage(p, Math.round((GLANCE_PX - p.width) / 2), Math.round((GLANCE_PX - p.height) / 2))
   return c
 }
-const ANIM_FRAMES = 45                           // 15 frames a second of a 3 s animation — the lens shows ~15 anyway (28.11: twice as fast to prepare)
+const ANIM_FRAMES = 90                           // up to 30 frames a second of a 3 s animation (28.11 owner: «smoother»)
 // The gift's symbols behind the model (owner 27.11): the 'Pattern' layer of the same Fragment animation, on the same canvas
 // and cut with the same crop as the model — so size and places are 1 in 1 as on the official card; drawn faintly.
 const HALO: [number, number][] = [[-5, 0], [5, 0], [0, -5], [0, 5], [-4, -4], [4, -4], [-4, 4], [4, 4]]
@@ -254,7 +254,16 @@ function modelFrames(slug: string): Promise<Frames | null> {
         const crop = document.createElement('canvas'); crop.width = crop.height = side
         const cc = crop.getContext('2d')!
         const pat = patSrc ? faintPattern(patSrc, sx, sy, side, GLANCE_PX) : null
-        for (let i = 0; i < count; i++) {
+        // 28.11: two passes — every other frame first (the animation can start right away), then the in-between frames
+        // fill in while it already plays, so it is quick to appear and smooth after a moment
+        const order: number[] = []
+        for (let i = 0; i < count; i += 2) order.push(i)
+        for (let i = 1; i < count; i += 2) order.push(i)
+        let done = 0
+        const gate: { half?: () => void } = {}
+        const halfReady = new Promise<void>((res) => { gate.half = res })
+        const work = (async () => {
+        for (const i of order) {
           a.goToAndStop(Math.round((i * n) / count), true)
           cc.clearRect(0, 0, side, side); cc.drawImage(cv, sx, sy, side, side, 0, 0, side, side)
           const f = lensify(crop, GLANCE_PX, range)
@@ -267,8 +276,9 @@ function modelFrames(slug: string): Promise<Frames | null> {
             for (const [ox, oy] of HALO) mc.drawImage(f.c, ox, oy)
             mc.globalCompositeOperation = 'source-over'
             mc.drawImage(f.c, 0, 0)
-            out.push(m)
-          } else out.push(f.c)
+            out[i] = m
+          } else out[i] = f.c
+          if (++done >= Math.ceil(count / 2) && gate.half) { gate.half(); gate.half = undefined }
           if (i === 0 && !restFrame.has(slug)) {           // the first frame replaces the still picture right away
             restFrame.set(slug, out[0])
             if (deals[idx]?.id === slug && !animId) paint()
@@ -276,6 +286,9 @@ function modelFrames(slug: string): Promise<Frames | null> {
           await new Promise((res) => setTimeout(res, 0))       // let the lens keep drawing meanwhile
         }
         a.destroy(); box.remove()
+        })()
+        out.length = count
+        await Promise.race([halfReady, work])
         return out
       } catch { return null }
     })())
@@ -287,7 +300,7 @@ function modelFrames(slug: string): Promise<Frames | null> {
 // the frame to rest on: the first one, unless the model is not fully there yet (some animations start empty)
 function fullest(frames: Frames) {
   const ink = (c: HTMLCanvasElement) => { const d = c.getContext('2d')!.getImageData(0, 0, c.width, c.height).data; let t = 0; for (let i = 3; i < d.length; i += 4) t += d[i]; return t }
-  const mid = frames[Math.floor(frames.length / 2)]
+  const mid = frames[Math.floor(frames.length / 2) & ~1] || frames[0]
   return ink(frames[0]) >= 0.8 * ink(mid) ? frames[0] : mid
 }
 
@@ -308,7 +321,8 @@ async function playModel(d: Deal) {
     if (deals[idx]?.id !== d.id || !animView() || asleep || (confirmDeal && Date.now() < confirmUntil)) break
     if (animOnce && performance.now() - start >= dur) break      // the user chose "once" in the bot's /settings
     const el = (performance.now() - start) % dur
-    const i = Math.min(frames.length - 1, Math.floor((el / dur) * frames.length))
+    let i = Math.min(frames.length - 1, Math.floor((el / dur) * frames.length))
+    while (i > 0 && !frames[i]) i--                                // in-between frames still being prepared
     if (i === animStep) { await new Promise((res) => setTimeout(res, 8)); continue }
     animStep = i; paint(); shown++
     await new Promise((res) => setTimeout(res, 0))
