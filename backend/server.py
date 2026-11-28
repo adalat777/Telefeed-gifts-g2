@@ -1099,6 +1099,8 @@ class H(BaseHTTPRequestHandler):
 
     def do_GET(self):
         u = urllib.parse.urlparse(self.path)
+        if u.path == "/diag":      # 28.11 owner: «run the checks yourself» — TeleFeed health seen from inside the server
+            return self._send(200, telefeed_diag())
         if u.path == "/health":
             return self._send(200, {"ok": True, "bot": bool(BOT), "version": VERSION, "started": STARTED})
         if u.path == "/signals":
@@ -1276,6 +1278,59 @@ class H(BaseHTTPRequestHandler):
 
     def log_message(self, fmt, *args):
         pass
+
+
+def telefeed_diag():
+    """The TeleFeed program on the same machine: is it listening, how fast it answers, memory/files, last log lines
+    (lines with wallets or @names left out). Read-only, no secrets."""
+    import socket
+    import subprocess
+    out = {"at": time.strftime("%H:%M:%S")}
+    t = time.time()
+    try:
+        with socket.create_connection(("127.0.0.1", 8080), timeout=3):
+            out["listening"] = True
+    except OSError as e:
+        out["listening"] = f"no: {e}"
+    try:
+        t = time.time()
+        with urllib.request.urlopen("http://127.0.0.1:8080/api/status", timeout=15) as r:
+            st = json.loads(r.read())
+        out["status_s"] = round(time.time() - t, 2)
+        out["status"] = {k: st.get(k) for k in ("ready", "now", "last_ok", "app", "loop", "stalls", "interval", "polls",
+                                                 "errors", "flood_waits") if k in st}
+    except Exception as e:  # noqa: BLE001
+        out["status_s"] = round(time.time() - t, 2)
+        out["status_error"] = f"{type(e).__name__}: {e}"
+    try:
+        for pid in os.listdir("/proc"):
+            if pid.isdigit():
+                try:
+                    cmd = open(f"/proc/{pid}/cmdline", "rb").read().replace(b"\0", b" ").decode(errors="replace")
+                except OSError:
+                    continue
+                if " -m server" in cmd or cmd.rstrip().endswith("-m server"):
+                    info = {"pid": int(pid), "cmd": cmd.strip()[:120]}
+                    try:
+                        info["fds"] = len(os.listdir(f"/proc/{pid}/fd"))
+                    except OSError:
+                        pass
+                    for line in open(f"/proc/{pid}/status"):
+                        if line.startswith(("VmRSS", "Threads")):
+                            k, v = line.split(":", 1)
+                            info[k] = v.strip()
+                    info["started_s_ago"] = round(time.time() - os.stat(f"/proc/{pid}").st_mtime)
+                    out.setdefault("processes", []).append(info)
+    except Exception as e:  # noqa: BLE001
+        out["proc_error"] = str(e)
+    try:
+        r = subprocess.run(["journalctl", "-u", "telefeed", "-n", "120", "--no-pager", "-o", "cat"], capture_output=True,
+                           text=True, timeout=10)
+        lines = [x for x in r.stdout.splitlines() if "Кошел" not in x and "@" not in x and "0:" not in x[:3]]
+        out["log"] = lines[-60:] or (r.stderr.strip()[:300] or "журнал недоступен")
+    except Exception as e:  # noqa: BLE001
+        out["log"] = f"{type(e).__name__}: {e}"
+    return out
 
 
 def self_update_loop(every=5):
