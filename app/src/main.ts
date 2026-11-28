@@ -287,7 +287,9 @@ function modelFrames(slug: string): Promise<Frames | null> {
             restFrame.set(slug, out[0])
             if (deals[idx]?.id === slug && !animId) paint()
           }
-          await new Promise((res) => setTimeout(res, 0))       // let the lens keep drawing meanwhile
+          // let the lens keep drawing meanwhile: while ANOTHER gift is animating, preparing this one goes slowly in the
+          // gaps, so the gift on screen does not stutter (owner 28.11 «no glitches»)
+          await new Promise((res) => setTimeout(res, animId && animId !== slug ? 45 : 0))
         }
         a.destroy(); box.remove()
         })()
@@ -1091,6 +1093,7 @@ function drawMessage(ctx: CanvasRenderingContext2D, right: string, title: string
 // 28.11 owner «as many frames as the lens can show»: while a gift animates only its column (t1 + t3) is re-encoded and
 // sent each frame — the text on the right goes once a second; each tile is PNG-encoded once (no second toDataURL pass)
 const sentTile = new Map<number, number>()
+const glanceBase: { key: string; c: HTMLCanvasElement | null } = { key: '', c: null }
 let drawing = false
 let wanted: (() => Promise<HTMLCanvasElement>) | null = null
 let animOnly = false, fullAt = 0, wantedAnim = false
@@ -1211,7 +1214,21 @@ function paint() {
     show(async () => {
       const { c, ctx } = blank()
       const frames = animId === d.id && animStep >= 0 ? await modelFrames(d.id) : null
-      drawGlance(ctx, d, frames ? frames[animStep] : restFrame.get(d.id) || await stillPicture(d.title, d.model), pos)
+      if (frames && frames[animStep]) {
+        // an animation frame: everything around the gift is the same as a moment ago — draw it once a second, then
+        // only put the new frame of the model on top (more frames per second on the lens, owner 28.11)
+        const bk = `${d.id}|${pos}|${Math.floor(Date.now() / 1000)}`
+        if (glanceBase.key !== bk) {
+          const b = document.createElement('canvas'); b.width = W; b.height = H
+          const bx = b.getContext('2d')!; bx.fillStyle = '#000'; bx.fillRect(0, 0, W, H)
+          drawGlance(bx, d, null, pos)
+          glanceBase.key = bk; glanceBase.c = b
+        }
+        ctx.drawImage(glanceBase.c!, 0, 0)
+        ctx.drawImage(frames[animStep], 10, 28)
+        return c
+      }
+      drawGlance(ctx, d, restFrame.get(d.id) || await stillPicture(d.title, d.model), pos)
       return c
     })
     if (!d.sold) playModel(d)
