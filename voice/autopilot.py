@@ -15,6 +15,7 @@
 Сцены 7–11 (Telegram) записываются руками, озвучка к ним — scene07…scene11.aiff (voice/make.sh).
 
   --no-record   не включать запись экрана (записывайте сами Cmd+Shift+5)
+  --region=x,y,w,h  записывать только этот кусок экрана (например, окно «Glasses Display»)
 """
 import json
 import os
@@ -112,7 +113,11 @@ def main():
     rec = None
     if record:
         try:
-            rec = subprocess.Popen(["screencapture", "-v", "-V" + str(int(total + 3)), VIDEO])
+            cmd = ["screencapture", "-v", "-V" + str(int(total + 3))]
+            region = [a.split("=", 1)[1] for a in sys.argv if a.startswith("--region=")]
+            if region:  # только окно очков: --region=x,y,ширина,высота (в точках экрана)
+                cmd.append("-R" + region[0])
+            rec = subprocess.Popen(cmd + [VIDEO])
             time.sleep(1.0)  # запись успевает начаться
         except Exception as e:
             print(f"! запись экрана не включилась ({e}) — запишите сами Cmd+Shift+5")
