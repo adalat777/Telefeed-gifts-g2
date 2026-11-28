@@ -95,6 +95,8 @@ async function modelPicture(title: string, model: string, size: number): Promise
 
 // A colour picture of the model → the lens look. `range` fixes the brightness range (animation frames share the first one's,
 // otherwise every frame would be stretched on its own and the model would flicker).
+// 28.11 owner: «models sharper» — gentler local sharpening (it made fine texture grainy), a few flat tone levels, crisp outlines
+const LENS_SHARP = 1.1, LENS_LEVELS = 0, LENS_EDGE = 0   // tried 0.5 / 6 / 0.32 — blotchy, kept as before
 function lensify(bmp: CanvasImageSource & { width: number; height: number }, size: number, range?: [number, number]) {
       const c = document.createElement('canvas'); c.width = c.height = size
       const ctx = c.getContext('2d')!
@@ -128,7 +130,7 @@ function lensify(bmp: CanvasImageSource & { width: number; height: number }, siz
       for (let y = 1; y < size - 1; y++) for (let x = 1; x < size - 1; x++) {
         const p = y * size + x
         const blur = (tone[p - 1] + tone[p + 1] + tone[p - size] + tone[p + size]) / 4
-        sharp[p] = Math.min(1, Math.max(0, tone[p] + 1.1 * (tone[p] - blur)))
+        sharp[p] = Math.min(1, Math.max(0, tone[p] + LENS_SHARP * (tone[p] - blur)))
       }
       tone.set(sharp)
       for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) {
@@ -139,8 +141,10 @@ function lensify(bmp: CanvasImageSource & { width: number; height: number }, siz
           const gx = t[p - size + 1] + 2 * t[p + 1] + t[p + size + 1] - t[p - size - 1] - 2 * t[p - 1] - t[p + size - 1]
           const gy = t[p + size - 1] + 2 * t[p + size] + t[p + size + 1] - t[p - size - 1] - 2 * t[p - size] - t[p - size + 1]
           e = Math.min(1, Math.hypot(gx, gy) * 0.9)
+          if (LENS_EDGE) e = e > LENS_EDGE ? 1 : e * 0.4               // 28.11: crisp outlines instead of soft halos
         }
-        const t0 = tone[p] / Math.max(alpha[p], 0.01)
+        let t0 = tone[p] / Math.max(alpha[p], 0.01)
+        if (LENS_LEVELS) t0 = Math.round(t0 * LENS_LEVELS) / LENS_LEVELS  // 28.11: flat tone areas — no grainy texture
         const v = (14 + 225 * t0 * t0) * (1 - 0.85 * e)          // the lens lifts darks, so keep the range low
         d[i] = d[i + 1] = d[i + 2] = v; d[i + 3] = Math.round(alpha[p] * 255)
       }
@@ -172,7 +176,7 @@ async function patternLayer(slug: string, w: number, h: number): Promise<HTMLCan
     if (!r.ok) return null
     const data = await r.json()
     const box = document.createElement('div')
-    box.style.cssText = 'position:fixed;left:-9999px;top:0;width:256px;height:256px;overflow:hidden'   // same as the model's box
+    box.style.cssText = 'position:fixed;left:-9999px;top:0;width:512px;height:512px;overflow:hidden'   // same as the model's box
     document.body.appendChild(box)
     const a = lottie.loadAnimation({ container: box, renderer: 'canvas', loop: false, autoplay: false, animationData: data,
       rendererSettings: { clearCanvas: true } })
@@ -218,7 +222,7 @@ function modelFrames(slug: string): Promise<Frames | null> {
         if (!r.ok) return null
         const data = await r.json()
         const box = document.createElement('div')
-        box.style.cssText = 'position:fixed;left:-9999px;top:0;width:256px;height:256px;overflow:hidden'
+        box.style.cssText = 'position:fixed;left:-9999px;top:0;width:512px;height:512px;overflow:hidden'
         document.body.appendChild(box)
         const a = lottie.loadAnimation({ container: box, renderer: 'canvas', loop: false, autoplay: false, animationData: data,
           rendererSettings: { clearCanvas: true } })
