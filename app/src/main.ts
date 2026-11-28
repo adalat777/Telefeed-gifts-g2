@@ -160,7 +160,7 @@ async function stillPicture(title: string, model: string): Promise<HTMLCanvasEle
   c.getContext('2d')!.drawImage(p, Math.round((GLANCE_PX - p.width) / 2), Math.round((GLANCE_PX - p.height) / 2))
   return c
 }
-const ANIM_FRAMES = 90                           // up to 30 frames a second of a 3 s animation
+const ANIM_FRAMES = 45                           // 15 frames a second of a 3 s animation — the lens shows ~15 anyway (28.11: twice as fast to prepare)
 // The gift's symbols behind the model (owner 27.11): the 'Pattern' layer of the same Fragment animation, on the same canvas
 // and cut with the same crop as the model — so size and places are 1 in 1 as on the official card; drawn faintly.
 const HALO: [number, number][] = [[-5, 0], [5, 0], [0, -5], [0, 5], [-4, -4], [4, -4], [-4, 4], [4, 4]]
@@ -1376,11 +1376,12 @@ function fullStep(dir: 1 | -1) {
 // the model animation of the deal on screen and the next two is prepared ahead, one at a time,
 // so it starts right away when you get there
 let prefetching = false
+const PREFETCH_AHEAD = 5
 async function prefetchFrames() {
   if (prefetching) return
   prefetching = true
   try {
-    for (let k = 0; k < 3; k++) {
+    for (let k = 0; k < PREFETCH_AHEAD; k++) {     // 28.11 owner: «after Up the gift thinks long» — ready before you swipe
       const d = deals[Math.min(deals.length - 1, idx + k)]
       if (d && !d.sold) await modelFrames(d.id)
     }
