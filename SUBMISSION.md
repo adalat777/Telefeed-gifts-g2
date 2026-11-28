@@ -8,6 +8,8 @@
 
 **Repository:** https://github.com/adalat777/Telefeed-gifts-g2
 
+**Live browser demo (no glasses needed):** https://adalat777.github.io/Telefeed-gifts-g2/?demo
+
 **Demo video:** <link to the video, up to 3 min>
 
 ---

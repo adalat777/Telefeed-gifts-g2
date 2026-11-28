@@ -92,7 +92,7 @@ npm run simulate     # Even Hub simulator
 Public backend (runs on the TeleFeed server next to the live database; set in `app/.env.production` and the whitelist
 in `app/app.json`): https://g2.77-216-135-201.sslip.io — `npm run build` / `npm run pack` use it.
 
-Browser demo (no glasses needed): open the app with `?demo` — the same code draws the 576×288 lens on the page;
+Browser demo (no glasses needed): **https://adalat777.github.io/Telefeed-gifts-g2/?demo** — or open the app with `?demo` — the same code draws the 576×288 lens on the page;
 gestures by buttons, ↑ ↓ Enter, D (double tap), H (hold) and the mouse wheel.
 
 One command for development: `./dev.sh` — app + simulator against the public backend, auto-updates from GitHub every 3 s
