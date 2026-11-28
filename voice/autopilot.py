@@ -30,7 +30,8 @@ import urllib.request
 API = "http://127.0.0.1:9898/api/input"
 HERE = os.path.dirname(os.path.abspath(__file__))
 OUT = os.path.expanduser("~/Desktop/telegift-voice")
-VIDEO = os.path.expanduser("~/Desktop/telegift-autopilot.mov")
+# a new name every run: screencapture cannot overwrite an existing file
+VIDEO = os.path.expanduser(time.strftime("~/Desktop/telegift-autopilot-%H%M.mov"))
 GAP = 0.8          # тишина после каждой сцены, с
 TAIL = 1.5         # после последнего нажатия сцены — ещё столько, чтобы глаз успел увидеть
 
