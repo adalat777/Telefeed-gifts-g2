@@ -171,6 +171,20 @@ class HttpTest(Base):
         self.assertEqual({b.get("callback_data") for b in btn[1:]}, {"chart:MirageLamp-35247", "watch:MirageLamp-35247"})
         self.assertIn("Resell estimate", p["caption"])
 
+    def test_send_uses_telefeed_gift_link_with_large_preview(self):
+        server._pairs["tok"] = 42
+        old = server.MINIAPP_URL
+        server.MINIAPP_URL = "https://telefeed.example"
+        try:
+            self.post("/send", {"token": "tok", "item": server.signals(20, 60)["items"][0]})
+        finally:
+            server.MINIAPP_URL = old
+        method, p = self.tg.calls[-1]
+        self.assertEqual(method, "sendMessage")
+        self.assertTrue(p["text"].startswith("https://telefeed.example/api/g/MirageLamp-35247"))
+        self.assertEqual(p["link_preview_options"], {"url": "https://telefeed.example/api/g/MirageLamp-35247",
+                                                     "prefer_large_media": True, "show_above_text": True})
+
     def test_photo_refused_falls_back_to_text(self):
         server._pairs["tok"] = 42
         self.tg.photo_ok = False

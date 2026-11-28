@@ -806,6 +806,14 @@ TELEFEED_API = os.environ.get("TELEFEED_API", "http://127.0.0.1:8080")
 MINIAPP_URL = os.environ.get("MINIAPP_URL", "").rstrip("/")
 
 
+def gift_link(slug):
+    """28.11: TeleFeed page of the gift (/api/g/<slug>) — messengers show the gift picture, name and price as the link
+    preview; a tap opens the TeleFeed Mini App right on this gift."""
+    if not slug or not MINIAPP_URL.startswith("https://"):
+        return None
+    return f"{MINIAPP_URL}/api/g/{slug}"
+
+
 def app_button(slug):
     """Inline button that opens TeleFeed as a Mini App on the gift (private chats only — that's where the bot writes)."""
     if not MINIAPP_URL.startswith("https://") or not slug or not re.fullmatch(r"[A-Za-z0-9]+-\d{1,9}", slug):
@@ -1185,7 +1193,17 @@ class H(BaseHTTPRequestHandler):
             ok = False
             slug = it.get("id") if isinstance(it.get("id"), str) and re.fullmatch(r"[A-Za-z0-9]+-\d{1,9}", it["id"]) else None
             try:
-                if slug:                                  # the gift picture with the deal as caption
+                link = gift_link(slug)
+                if link:   # 28.11 owner: our gift link with a rich preview (big gift picture above, name, price) → TeleFeed
+                    params = {"chat_id": chat, "text": f"{link}\n\n{deal_text(it)}",
+                              "link_preview_options": {"url": link, "prefer_large_media": True, "show_above_text": True}}
+                    if markup:
+                        params["reply_markup"] = markup
+                    try:
+                        ok = bool(tg("sendMessage", params, 15).get("ok"))
+                    except Exception:
+                        ok = False
+                if slug and not ok:                       # the gift picture with the deal as caption
                     p = {"chat_id": chat, "photo": FRAGMENT_GIFT.format(slug.lower()), "caption": deal_text(it)[:1000]}
                     if markup:
                         p["reply_markup"] = markup
